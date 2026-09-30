@@ -7,21 +7,21 @@ Bounded context: `src/mbs/market_day/`. Owns the operational selling workflow at
 ## Feature 16.1 — Market-Day Session
 - [ ] Feature complete
 - [ ] Create one market-day selling session linked to a dated market visit, business timezone, operator, and device/session identifier.
-- [ ] Record session status: OPEN, PAUSED, CLOSED, or CLOSE_EXCEPTION. Prevent sales after close unless an audited correction or reopening is authorized.
+- [ ] Record OPEN, PAUSED, CLOSE_EXCEPTION, OPERATIONALLY_CLOSED, and SETTLEMENT_RECONCILED with an owner-approved transition table (D-03); a close exception cannot disappear until resolved or approved, and operational close does not imply settlement. Prevent sales after operational close unless an audited MANAGER reopening/correction is authorized.
 - [ ] Show only products configured for the selected market session, with current price, tax treatment, available quantity/status, and customer-facing name.
 - [ ] Support fast selling on both phones and computer browsers: compact touch-friendly controls on mobile, and a desktop layout that uses the wider viewport for product selection, cart review, and tender actions without stretching a narrow mobile screen. Include product search, favorites/tiles, quantity controls, notes, and minimal typing.
 - [ ] Allow authorized stall helpers to sell without granting access to settings, tax packages, credentials, or unrelated administration.
 
 ## Feature 16.2 — Sale Capture & Tender
 - [ ] Feature complete
-- [ ] Capture Square-originated sales through Capability 14 without creating a duplicate local sale fact.
+- [ ] Square POS handles Square checkout in MVP 2; this interface displays imported Square Orders via Capability 14 rather than initiating a second local Square sale. Before building session capture, obtain owner approval for D-16 correlation; show import-watermark staleness when Square POS has no registered provider identity, and require authorized resolution of unmatched or ambiguous Orders.
 - [ ] Capture cash, check, other-card, and other-tender sales locally through the Capability 14 manual-sale service with a per-sale idempotency key.
 - [ ] Support quantity changes, line discounts, order discounts, refunds, voids, and corrections as linked events; never overwrite the original sale.
 - [ ] Support a configured market-session price override only with an audit reason and effective session scope; do not mutate the product master price.
 - [ ] Apply a session price override only to a manual tender, or require the identical audited price/discount to be created in Square before accepting the Square sale. A local override must never make a Square order, payment, tax, or closeout amount differ without a visible reconciliation exception.
 - [ ] Allow a sale to be held as a draft during a customer interaction and explicitly completed before it affects the accepted ledger.
 - [ ] Require every completed sale to have product, quantity, amount, tender, market session, business date, and source identity; unresolved entries remain visible exceptions.
-- [ ] Treat a Square transaction as `PROVIDER_PENDING` until its Order fact has been durably staged and accepted by Capability 14. The market session may show a pending estimated tender total, but it must not represent that total as reconciled or settled.
+- [ ] Show `PROVIDER_PENDING` only for a registered, correlatable provider identity until its Order is durably staged and accepted by Capability 14. A Square POS transaction without that identity is not a known local pending sale; show last sync/watermark and later exception status instead. Never show a pending estimate as accepted or settled.
 
 ## Feature 16.3 — Connectivity & Synchronization
 - [ ] Feature complete
@@ -44,7 +44,7 @@ Bounded context: `src/mbs/market_day/`. Owns the operational selling workflow at
 
 ## Feature 16.5 — Availability, Preorders & Customer Pickup
 - [ ] Feature complete
-- [ ] Use the MVP 2 session-allocation service to atomically reserve, commit, reverse, and explicitly dispose of quantities by market session. Show sold-out and reserved quantities and prevent confirmed sales from exceeding available quantity unless an authorized oversell is recorded. Every allocation event has a source identity and idempotency key; Capability 6 consumes or extends these events rather than recreating stock facts.
+- [ ] Use the MVP 2 session-allocation service to atomically reserve, commit, release, and explicitly dispose of quantities by market session. Validate loads/transfers across concurrent sessions against one source-event identity (D-17); do not subtract both an allocation and its accepted sale from global stock. Before MVP 3 physical opening counts, label availability as operator-entered and never claim a globally verified sold-out state. Prevent confirmed sales from exceeding the verified session allocation unless an authorized oversell is recorded. Refunds do not restock without a separately audited physical return; Capability 6 consumes or extends these events rather than recreating stock facts.
 - [ ] Support optional preorder/reservation records linked to a market visit, customer contact, requested products, quantity, payment/deposit status, pickup status, substitutions, and cancellation.
 - [ ] Keep customer contact data consent-aware and access-controlled; do not require customer accounts for an in-person sale.
 - [ ] Mark pickup orders collected, partially collected, cancelled, or unclaimed; report unclaimed inventory for an explicit disposition.

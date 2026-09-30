@@ -5,6 +5,8 @@ Scope: MVP 1–8 in [01-mvp-roadmap.md](01-mvp-roadmap.md), judged against [00-o
 
 This document does not override the precedence in the readiness gate. Every "recommended default" below is a **proposal**; it becomes binding only when the owner approves it in §5 and the governing capability/roadmap text is reconciled. Approval does not certify unimplemented tests, expand an outline into a runnable slice, or waive a production gate.
 
+Independent of the optional defaults below, Square API access has a mandatory no-write gate in Capability 3 and the MVP 2 readiness profile. MBS never attempts a provider-side mutation, even with owner approval of a session workflow. SQ-001 must pass and credential read scopes must be verified before live Square activation.
+
 Two definitions:
 - **Build GO**: an agent can implement and test the MVP locally with synthetic data and mocked providers, without stopping for a decision.
 - **Prod GO**: the MVP can be promoted with real data and live providers.
@@ -13,8 +15,8 @@ Two definitions:
 
 | MVP | Build verdict (today) | Build verdict after §5 approval | Prod verdict | Blocking items |
 |---|---|---|---|---|
-| Foundation slice | **NO-GO** | GO | n/a | Docker is not installed on this laptop (verified: `docker` not found) |
-| 1 Receipts | CONDITIONAL | **GO** | NO-GO | D-00, D-06–D-15; user actions U-1, U-2, U-3 |
+| Foundation slice | **GO** | GO | n/a | None. Docker Desktop 29.8.1 + Compose v5.5.1 installed and verified 2026-09-30 (U-1 done) |
+| 1 Receipts | CONDITIONAL | **GO** | NO-GO | D-00, D-06–D-15; user actions U-2, U-3 |
 | 2 Square + Sales + Market-Day | **NO-GO** | CONDITIONAL (expand/test slices) | NO-GO | D-01–D-05, D-12, D-16–D-19; U-4 |
 | 3 Products/Recipes/Costing | CONDITIONAL | GO | NO-GO | D-20, D-26–D-31 |
 | 4 Shopping + WhatsApp | CONDITIONAL | CONDITIONAL (balance contract tests; Meta calls mocked) | NO-GO | D-17, D-32; U-5 |
@@ -23,14 +25,14 @@ Two definitions:
 | 7 Dashboards/Rankings/Forecast | **NO-GO** | CONDITIONAL (translate and implement cases) | NO-GO | D-23–D-25, D-27, D-34; 61 structural/tautological cases need application equivalents |
 | 8 Tax + Full Release | **NO-GO** | CONDITIONAL (draft workpapers only) | **NO-GO by design** | Needs signed tax-professional approval and a coverage certificate (U-7). The agent cannot close this gate. |
 
-Bottom line: local receipt work may continue with mocks; Docker-dependent foundation validation awaits U-1. Owner approval of §5 removes decision blockers, not missing slice specifications, executable tests, or production evidence. MVP 8 production always needs a human tax professional.
+Bottom line: local receipt work may continue with mocks; the Docker Compose foundation is installed and validated (U-1 done 2026-09-30). Owner approval of §5 removes decision blockers, not missing slice specifications, executable tests, or production evidence. MVP 8 production always needs a human tax professional.
 
 ## 2. Evidence Reviewed
 
 | Artifact | Finding |
 |---|---|
 | `plan/*.md`, 16 capability files | Detailed and mostly internally consistent. Plan precedence resolves most source conflicts. |
-| `plan/test-case-manifest.csv` | Had a header only (0 rows). Now contains 110 workbook cases + 18 MVP 1 criteria, all `PLANNED`. It records no coverage. |
+| `plan/test-case-manifest.csv` | Had a header only (0 rows). Now contains 110 workbook cases + 18 MVP 1 criteria + SQ-001, all `PLANNED`. It records no coverage. |
 | `Market_Business_System_v3_3_Testing_Dashboard.xlsx` (42 sheets) | Contains the fixtures and 110 regression cases. 46 are behavioral, 46 are formula-existence checks (`ISFORMULA`/`FORMULATEXT`), 14 are row-count/meta checks, 3 check configuration, and 1 is a tautology (RT041 is always 0). |
 | `Walmart_Receipt_Complete_With_AI.xlsx` | Three receipts and 32 lines. Line totals reconcile exactly to the subtotals (55.82, 29.50, 29.81). Good golden OCR fixture. |
 | Blueprint DOCX | Formulas and schemas are useful. It has stale stack choices (React, K8s, CSV import) that the plan supersedes. |
@@ -41,7 +43,7 @@ Bottom line: local receipt work may continue with mocks; Docker-dependent founda
 
 | # | Severity | Finding | Resolution |
 |---|---|---|---|
-| F1 | Blocker | Docker Desktop/Engine is not installed. The current slice needs `docker compose`. | U-1 |
+| F1 | ~~Blocker~~ Resolved 2026-09-30 | Docker Desktop was not installed; the current slice needs `docker compose`. Now installed (Docker Desktop 29.8.1, Compose v5.5.1, WSL 2 + Ubuntu 26.04 LTS) and the Compose stack passes its acceptance checks. | U-1 done |
 | F2 | Blocker (vibe) | [03-current-slice.md](03-current-slice.md) defines only the foundation slice and forbids the agent from choosing the next one. The agent stops after every slice. | Approve the slice queue in §7 and the auto-advance rule (D-00) |
 | F3 | Blocker (MVP 7) | 61 workbook cases are structural/meta/tautological, and three additional cases are configuration checks. "All 110 pass" has no executable meaning in Python yet. | D-23 translation rules and executable manifest evidence |
 | F4 | High | Workbook fixtures conflict with each other. RT043 values TEST-VAR002 at cost 3.80, but RT056 requires VAR002 to have no cost. The `Sales_Data` Square Fee fixture is 4.50, but the formula gives 150 × 0.026 + 0.10 = 4.00. | D-26 |
@@ -56,10 +58,10 @@ Bottom line: local receipt work may continue with mocks; Docker-dependent founda
 ## 4. Per-MVP Assessment
 
 ### MVP 1 — Receipts
-- **Ready:** requirements, data model, duplicate logic, dispositions, and test profile. Golden fixture data exists. The Google call can be fully mocked.
+- **Ready:** requirements, data model, duplicate logic, dispositions, and test profile. Golden fixture data exists for mocked local OCR; production-like local accuracy still needs validation.
 - **Gaps:** no numeric limits (D-06–D-08), no malware scanner choice (D-09), `Receipt_ID` canonical format (D-10), password reset path (D-11), release measure values (D-06).
 - **Agent can do without user:** everything through the `receipt-mvp` profile with the mocked OCR engine.
-- **Prod needs:** U-2 (Google project/budget), U-3 (data classification, retention, backup destination), and a timed restore.
+- **Prod needs:** local OCR accuracy/review approval, U-3 (data classification, retention, backup destination), and a timed restore. U-2 applies only to the future Google enhancement.
 
 ### MVP 2 — Square, Sales Ledger, Market-Day POS
 - **Blocked by three owner decisions already listed in 03-current-slice.md** (timezone authority, session price/availability, sale/close state table), plus the offline-mode decision and the quantitative targets.
@@ -137,8 +139,8 @@ Approved by: ____________________  Date: ____________  Commit: ____________
 
 | ID | Action | Needed before | Link/Detail |
 |---|---|---|---|
-| U-1 | Install Docker Desktop (WSL 2 backend) | Foundation slice | https://docs.docker.com/desktop/setup/install/windows-install/ |
-| U-2 💲 | Create a Google Cloud project with a Document AI Expense Parser, then pick a region and a monthly budget alert amount | MVP 1 real-OCR smoke test only | See Capability 1.1 |
+| U-1 | ✅ Done 2026-09-30 — Install WSL 2 with Ubuntu 26.04 LTS (`wsl --install -d Ubuntu-26.04`), then Docker Desktop (WSL 2 backend) | Foundation slice | Capability 11.1; [Windows Docker guide](../user-docs/Docker_Windows11_Installation_Guide.md); https://docs.docker.com/desktop/setup/install/windows-install/ |
+| U-2 💲 | Create a Google Cloud project with a Document AI Expense Parser, then pick a region and a monthly budget alert amount | Future optional Google provider activation only; not MVP 1 | See Capability 1 future enhancement |
 | U-3 🔒 | Choose an encrypted backup destination and a key owner; approve D-15 | MVP 1 real data | Capability 11.2 |
 | U-4 | Create a Square Developer sandbox app and add its token to `.env` (never to chat) | MVP 2 integration tests against sandbox; unit tests are mocked | Capability 3.1 |
 | U-5 💲 | Set up the Meta WABA, phone number, display name, consent wording, and spend threshold | MVP 4 production | Capability 13.1 |
@@ -151,7 +153,7 @@ Credentials must be typed directly into `.env` files or secret stores. Never pas
 
 Every slice follows the same template:
 - **Scope:** the steps listed.
-- **Evidence:** named focused tests and applicable manifest IDs pass, then `ruff`, `mypy`, and `pytest` on the host; run the same checks and migration tests in the web container when Docker is available. Record actual commands, environment, and outcomes, never infer coverage from a planned test ID.
+- **Evidence:** named focused tests and applicable manifest IDs pass, then `ruff`, `mypy`, and `pytest` on the host; run the same checks and migration tests in the web container. Record actual commands, environment, and outcomes, never infer coverage from a planned test ID.
 - **Stop conditions:** a decision not covered by §5, a user-only action, or a failure the agent cannot fix after diagnosis.
 
 Only after D-00 is approved can the agent move to the next **fully specified, approved and unblocked** row without asking. The active task and next step remain in `03-current-slice.md`; a passing host suite does not clear a Docker-dependent gate.
@@ -162,11 +164,11 @@ Only after D-00 is approved can the agent move to the next **fully specified, ap
 ### MVP 1 (Receipts)
 | Slice | Scope | Manifest IDs |
 |---|---|---|
-| S0 | Foundation scaffold partly implemented: pyproject + lock, `src/mbs`, health endpoint; Compose verification still blocked by U-1. The in-memory receipt domain work in `03-current-slice.md` also precedes S1. Do not check this row until its container validation passes. | Focused receipt tests named in `03-current-slice.md` |
+| S0 | Foundation scaffold: pyproject + lock, `src/mbs`, health endpoint; Compose container validation passed 2026-09-30 (all five services up, `/health` ok, in-container pytest/ruff/mypy pass). The in-memory receipt domain work in `03-current-slice.md` also precedes S1. | Focused receipt tests named in `03-current-slice.md` |
 | S1 | SQLAlchemy/Alembic baseline, `tbl_settings` with seeded catalog, audit log, error log, test DB fixture | RT093 (app equivalent) |
 | S2 | Users, Argon2id, server sessions, CSRF, roles, first-admin bootstrap CLI, admin reset (D-11–D-14) | RM-014 |
 | S3 | Protected file store, upload endpoint, signature/size validation, SHA-256 unique, outbox, ClamAV adapter (D-07, D-09) | RM-001, RM-003 |
-| S4 | `OCREngine` interface; mock `DocumentAIEngine` built from Walmart fixtures; Celery task with lease/idempotency; `OCR_OUTCOME_UNKNOWN` | RM-002, RM-006 |
+| S4 | `OCREngine` interface; local Tesseract + OpenCV adapter tested with synthetic fixtures; Celery task with lease/idempotency and failed-job retry/review | RM-002, RM-006 |
 | S5 | Receipt upload/header/items models, ISO normalization, `Receipt_ID` (D-10), unique constraint, totals check | RM-005, RM-009, RM-017 |
 | S6 | pHash near-duplicate hold and manager resolution (D-08) | RM-004 |
 | S7 | Editable category rules table seeded from blueprint §6.5 | RM-018 |
@@ -176,10 +178,10 @@ Only after D-00 is approved can the agent move to the next **fully specified, ap
 | S11 | Remembered item rules | RM-012 |
 | S12 | Soft delete, import audit, retention settings (no auto-purge) | RM-015 |
 | S13 | Backup/restore scripts, restart-survival smoke, `receipt-mvp` profile run recorded in `tblTesting` | RM-010, RM-016 |
-| S14 | *(Needs U-2, U-3)* Live Document AI adapter behind a feature flag; one controlled real-OCR smoke test | — |
+| Future (outside MVP 1) | *(Needs U-2, U-3 and provider approvals)* Optional Document AI adapter behind a feature flag; one controlled live-provider smoke test | — |
 
 ### MVP 2–8 (outlines only; create and approve bounded slices before any implementation)
-- **MVP 2:** Square POS/session correlation (D-16) and stock source-event contract (D-17) → Catalog staging → minimal product + effective cost → market directory, location map, dated visits, operating hours (D-01, D-18) → Orders staging with cursor → line acceptance and exceptions (D-03) → manual sales → Payments/fees reconciliation → HELPER role and market-day session → session allocation (D-02) → tender closeout → `sales-mvp`.
+- **MVP 2:** read-only Square adapter and SQ-001 gate → Square POS/session correlation (D-16) and stock source-event contract (D-17) → Catalog staging → minimal product + effective cost → market directory, location map, dated visits, operating hours (D-01, D-18) → Orders staging with cursor → line acceptance and exceptions (D-03) → manual sales → Payments/fees reconciliation → HELPER role and market-day session → session allocation (D-02) → tender closeout → `sales-mvp`.
 - **MVP 3:** Unit registry (D-30) → full product master and status (D-28) → recipes, supplies, waste % → ingredient cost history → purchases → MVP 1 migration replay/rollback → opening counts (D-31) → `costing-mvp` plus RT051–RT064 and RT070.
 - **MVP 4:** `StockBalanceReader` (D-32) → shared production service → load lists → store-grouped shopping → WhatsApp adapter (mocked) → prep confirmation → `prep-mvp`.
 - **MVP 5:** Market cost periods → weekly visits (D-18) → route legs and allocation (D-22) → production UI and corrections → expenses → assets → `markets-mvp` plus RT071–RT082.
@@ -191,7 +193,7 @@ Only after D-00 is approved can the agent move to the next **fully specified, ap
 
 Re-run this assessment when:
 - §5 is signed.
-- Docker is installed.
+- Docker is installed. *(Triggered 2026-09-30; see log below.)*
 - Any MVP profile passes or fails.
 - A governing plan file changes.
 
@@ -200,3 +202,4 @@ Record each change to a verdict here, with its date and the evidence behind it.
 | Date | Change | Evidence |
 |---|---|---|
 | 2026-09-30 | Foundation slice scaffold built; host checks pass. Build verdict stays NO-GO until the Docker acceptance commands run (U-1). Capability 16 converted to checkboxes (F9). | pytest 1 passed, ruff and mypy strict clean on Python 3.12.10; `/health` returned 200 |
+| 2026-09-30 | U-1 done: WSL 2 with Ubuntu 26.04 LTS and Docker Desktop installed. Foundation slice Build verdict NO-GO → **GO**; F1 resolved. | WSL 3.0.1.0, `wsl -l -v` → `* Ubuntu-26.04` v2; Docker Desktop 29.8.1 (Linux engine), Compose v5.5.1; `hello-world` ran; `docker compose config --quiet` OK; `docker compose up --build -d` started web, postgres (healthy), redis (healthy), celery-worker, celery-beat; `/health` → `{"status":"ok"}`; in-container pytest 24 passed, ruff and mypy clean |

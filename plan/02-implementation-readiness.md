@@ -9,12 +9,13 @@ Status: **conditional go for local MVP 1 foundations only**. Do not ingest real 
 - [ ] Classify `support/WDS_v2_1_Reconstruction_Grade_Specification 1.docx` and `support/Devin_MBS_v3_3_Prompt.docx` / `.txt` as reference-only or superseded, and record the approving owner and rationale; they are not independent authority for implementation choices.
 - [ ] Resolve conflicting requirements before implementation. Precedence is: approved signed readiness decision, then `00-overview.md`, then `01-mvp-roadmap.md`, then capability files, then source documents/workbooks. A lower-precedence source must not silently override a higher-precedence requirement.
 - [ ] Log a requirement change with its rationale, approving owner, affected capability, migration impact, and regression-test impact before implementing it.
-- [ ] Complete `plan/test-case-manifest.csv`, mapping every MVP 1 acceptance criterion and each of the 110 source-workbook cases to source artifact/tab/cell or scenario, fixture, expected result, structural/behavioral test type, automated test ID, validation command, and release profile. An empty or partially mapped manifest does not satisfy this gate.
+- [ ] Complete `plan/test-case-manifest.csv`, mapping every MVP 1 acceptance criterion and each of the 110 source-workbook cases to source artifact/tab/cell or scenario, concrete application fixture and expected result, structural/behavioral test type, implemented automated test ID, runnable validation command, and release profile. Its current 129 PLANNED rows (including SQ-001; only that row has a proposed command, and none of the referenced tests is implemented) do not satisfy this gate; translate structural cases into executable application equivalents before certification.
 
 ## Real-Data Privacy & Provider Approval
 
 - [ ] 🧑‍💻 Approve a data classification for receipt scans, OCR payloads, receipt records, audit data, and backups; record the data owner and permitted users.
-- [ ] 🧑‍💻 Approve Google Document AI processor region, data-transfer terms, monthly spend limit, budget alerts, and the process for an OCR provider outage or uncertain submission.
+- [ ] 🧑‍💻 Approve local OCR accuracy/review thresholds and recovery from failed processing before MVP 1 production.
+- Future optional Google Document AI activation separately requires approval of processor region, data-transfer terms, monthly spend limit, budget alerts, and uncertain-submission policy; see Capability 1's future enhancement. This is not part of the MVP 1 gate.
 - [ ] 🧑‍💻 Approve retention periods and legal/operational hold rules for source files, raw OCR payloads, canonical receipts, audit data, and backups. Record the deletion and restoration verification owner.
 - [ ] Select and document the upload malware-scanning service or explicitly approve a compensating control before accepting real files.
 - [ ] Verify that the chosen production CSS asset is version-pinned, locally served, covered by the content-security policy, and available without a third-party CDN. The Tailwind CDN may be used only for local prototyping.
@@ -34,6 +35,8 @@ The owner must approve values before MVP 1 production promotion. Measure them in
 ## MVP 2 Market-Day Measures
 
 Before MVP 2 production, approve and test values for online sale acknowledgement, Square synchronization delay, queued-sale state visibility, outage recovery, browser/device recovery, and tender-closeout discrepancy handling. The documented decision must also state whether offline sale queueing is supported; if not, the UI must prevent offline sale submission and make that limitation explicit.
+
+- [ ] Before connecting any live Square account or promoting `sales-mvp`, verify the granted Square credential permissions are read-only and restricted to required Catalog, Orders, Payments, and Location reads; broad/write-capable credentials fail activation. Run the Capability 3 adapter allowlist tests, including approved read-only POST searches and attempted create/update/delete/cancel/refund calls from sync, retries, and admin routes; prove forbidden calls are rejected locally with zero outbound provider requests. Record the credential scope review and test results with the release candidate.
 
 ## MVP 3 Costing & Opening-Balance Measures
 

@@ -8,16 +8,16 @@ This roadmap defines deployable release order. Capability numbers identify funct
 
 **In scope**
 - Authenticated upload of image/PDF, file validation, status/progress, receipt list/detail, manual correction, exact/near-duplicate safeguards, audit trail, and soft delete.
-- Google Document AI Expense Parser is the selected provider. The source scan is saved in protected persistent file storage; Postgres stores normalized header/items, immutable raw OCR JSONB, and a versioned canonical receipt JSONB snapshot.
-- Exact SHA-256 matches are rejected before OCR. Local perceptual matches are held for review before Google is called. A unique Receipt_ID check rejects different scans of an already-imported receipt after extraction.
-- Normal viewing, search, correction, and export use stored data and never invoke OCR. Rerun OCR is an explicit ADMIN action with a cost warning; uncertain provider timeouts are not blindly retried.
+- Local Tesseract + OpenCV is the selected provider. The source scan is saved in protected persistent file storage; Postgres stores normalized header/items, immutable raw OCR JSONB, and a versioned canonical receipt JSONB snapshot.
+- Exact SHA-256 matches are rejected before OCR. Local perceptual matches are held for review before OCR runs. A unique Receipt_ID check rejects different scans of an already-imported receipt after extraction.
+- Normal viewing, search, correction, and export use stored data and never invoke OCR. Rerun OCR is an explicit audited ADMIN action; failed local jobs retry idempotently without duplicating receipts.
 - Include four receipt-line dispositions: Personal/Non-business, Ordinary Business Purchase, Recipe Ingredient, Capital Asset/Equipment. Persist reviewer decisions and remember exact item matches.
 - Create MVP-sized receipt-linked ingredient-purchase, ordinary-expense, and capital-asset records, plus stable minimal Ingredient and Recipe records for receipt links. Full product setup, unit conversions/costing, depreciation, weekly expenses, and inventory valuation come later.
 - Deploy internally with Docker Compose, Postgres, Redis/Celery, persistent file storage, authenticated manager UI, migrations, health check, backups, and tested restore. No Square, WhatsApp, inventory engine, or dashboards required.
 
-**Deferred:** Full cost/accounting logic, multi-receipt business dashboards, Square data, weekly operations, inventory valuation, tax packages, and messaging.
+**Deferred:** Optional Google Document AI integration (with separate privacy and cost approvals), full cost/accounting logic, multi-receipt business dashboards, Square data, weekly operations, inventory valuation, tax packages, and messaging.
 
-**Done when:** a manager can upload, review/correct, classify and link receipt lines, save, then retrieve all parsed data after a container restart without another OCR call; duplicate paths do not overwrite data or cause unnecessary API calls. The `receipt-mvp` profile in Capability 10 and the MVP 1 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
+**Done when:** a manager can upload, review/correct, classify and link receipt lines, save, then retrieve all parsed data after a container restart without another OCR run; duplicate paths do not overwrite data or cause unnecessary OCR work. The `receipt-mvp` profile in Capability 10 and the MVP 1 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 2 — Square Setup, Sales Activation & Market-Day Selling
 **Goal:** Establish the shared sales ledger and let a small business capture and close real market-day sales without duplicate or untraceable facts.
@@ -26,6 +26,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 
 **In scope**
 - Stage A: Capability 3 syncs Square Catalog and stages stable Item/Variation IDs.
+- Before Square activation, pass the read-only API gate in Capability 3: verify read-scoped credentials and prove the provider adapter rejects every non-allowlisted or mutating operation before network I/O, including from retries and admin-triggered sync. The local Sync Now command may write staging records in MBS but must never write to Square.
 - Stage B: create the minimum sellable product records keyed by Variation ID, with a user-reviewed effective product cost; create Market IDs, Square Location-to-Market/channel mappings, effective-dated local operating-hour schedules, and dated market visits for the history being imported.
 - Stage C: Capability 3 stages Square Orders/Payments; Capability 14 accepts each Square line only when its Variation ID, effective product cost, and dated market visit or explicit non-market channel resolve. A market line must also fall within the market's effective-dated operating hours in local time, unless an authorized exception is recorded. Payments never creates a second Square sales fact.
 - Stage D: Capability 14 provides audited manual entry for cash and other non-Square sales, linked to product, date, channel/market, amounts, tax, tender, and any refund/correction; both sources feed shared reporting and tax reconciliation.

@@ -7,15 +7,12 @@ Bounded context: `mbs/receipts/` (blueprint §3.1 #5, §6). Accepts uploaded rec
 ## Feature 1.1 — OCR Engine Selection & Setup
 - [ ] Feature complete
 
-**Current choice:** Use Google Document AI's prebuilt **Expense Parser** for the Receipt MVP. It reduces local OCR tuning and produces receipt-oriented structured fields. The source image/PDF is sent to Google and usage may be billed by page/processor; the app stores the complete returned extraction in Postgres so normal viewing and reuse never incur another OCR request.
+**Current choice:** Use local **Tesseract + OpenCV** processing for the Receipt MVP. Receipt images/PDFs stay on the app's host during OCR; persist the raw extraction and normalized data in Postgres so normal viewing and reuse never rerun OCR. Validate accuracy against synthetic receipt fixtures and route uncertain fields to manual review.
 
-Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be retained as an optional local provider for offline/privacy-sensitive processing, with a likely accuracy/tuning trade-off; it is not the MVP default.
+Keep the provider-neutral `OCREngine` interface. **Google Document AI Expense Parser** is a future optional provider, not an MVP dependency; enabling it requires separate privacy, region, cost, and retry-policy approvals.
 
-- [ ] 🧑‍💻 Create/configure a Google Cloud project and Document AI Expense Parser, enable the API, review current [pricing](https://cloud.google.com/document-ai/pricing) and regional data-handling terms, and set an agreed monthly budget alert.
-- [ ] Store Google credentials and processor/region IDs only in deployment secrets; never commit them or store tokens in `tbl_settings`.
-- [ ] Do not send real receipt files to Google until the real-data privacy, retention, malware-scanning, and provider-approval items in [the implementation-readiness gate](../02-implementation-readiness.md) are complete.
-- [ ] Implement `OCREngine` and `DocumentAIEngine` as the configured MVP provider; keep Tesseract/OpenCV optional behind the same interface.
-- [ ] Capture the provider response, OCR schema/provider version, confidence, and page count on the first successful processing; persist them before marking the job complete.
+- [ ] Implement `OCREngine` with Tesseract + OpenCV as the configured local MVP provider; test extraction against synthetic image/PDF fixtures and flag uncertain fields for review.
+- [ ] Capture the local engine/version, raw extraction, confidence when available, and page count on the first successful processing; persist them before marking the job complete.
 
 ## Feature 1.2 — Upload & Async Processing
 - [ ] Feature complete
@@ -24,10 +21,10 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 - [ ] Persist each staged file's upload row and an outbox/task event in one database transaction; a retrying dispatcher publishes committed jobs to Redis/Celery. Workers claim jobs with a lease/lock and idempotency key so a broker outage or worker crash cannot lose work or process one upload concurrently.
 - [ ] Promote staged files to their immutable protected-store keys only after the upload record commits; clean abandoned staging files through an audited age-based janitor without deleting files referenced by live database rows.
 - [ ] Enforce configurable maximum file bytes, PDF page count, image dimensions, upload rate, and allowed media types; verify file signatures (not only extensions), reject malformed/encrypted files, and scan uploads before processing.
-- [ ] Compute a source-file SHA-256 and check it against `tbl_receipt_uploads` before enqueuing OCR. Reject/return the existing upload for an exact duplicate and do not call Google again; enforce a database unique constraint to handle concurrent duplicate requests.
-- [ ] Compute a local perceptual fingerprint for each image/PDF page before OCR. If it closely matches a stored source, mark the upload `POSSIBLE_DUPLICATE`, block the Google call, and require a manager to confirm “already imported” or “process as a new receipt”; never silently override a possible duplicate.
-- [ ] Submit one OCR request for each newly accepted upload and persist the complete response before completing the job. Retry automatically only when the request is known not to have reached/been accepted by Google; if submission outcome is uncertain, mark `OCR_OUTCOME_UNKNOWN`, reconcile provider operation status where possible, and require an ADMIN-confirmed retry with a cost warning rather than resubmitting blindly.
-- [ ] Viewing, searching, correcting, exporting, or reloading a receipt must read saved database data and never call OCR. Rerun OCR only through an explicit ADMIN action that warns about external data transfer and possible charge, records the reason, and saves a new extraction version without overwriting the original.
+- [ ] Compute a source-file SHA-256 and check it against `tbl_receipt_uploads` before enqueuing OCR. Reject/return the existing upload for an exact duplicate and do not rerun OCR; enforce a database unique constraint to handle concurrent duplicate requests.
+- [ ] Compute a local perceptual fingerprint for each image/PDF page before OCR. If it closely matches a stored source, mark the upload `POSSIBLE_DUPLICATE`, block OCR, and require a manager to confirm “already imported” or “process as a new receipt”; never silently override a possible duplicate.
+- [ ] Process each newly accepted upload locally and persist the complete extraction before completing the job. Retry failed local jobs idempotently without creating duplicate receipt records; retain failure details and require manual review when extraction remains uncertain.
+- [ ] Viewing, searching, correcting, exporting, or reloading a receipt must read saved database data and never call OCR. Rerun OCR only through an explicit audited ADMIN action that records the reason and saves a new extraction version without overwriting the original.
 - [ ] Log engine/version, attempt, duration, failure reason, idempotent job key, and provider page count when applicable. Apply the configurable retention policy in Capability 2; if no period is configured, do not automatically purge source files or OCR payloads.
 - [ ] Celery task orchestration per blueprint §6.3: (1) extract via configured OCR engine, (2) count existing `tbl_receipts` rows as pre-import baseline, (3) compute `Receipt_ID` per extracted receipt and check duplicates, (4) classify each line item's category, (5) report existing/new/duplicate/added counts, (6) append only non-duplicate receipts + line items, (7) stamp `import_timestamp`.
 - [ ] Task status/result endpoint so the UI can poll and show progress on the upload page.
@@ -54,8 +51,13 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 
 ## Feature 1.6 — Early Receipt MVP Release
 - [ ] Feature complete
-- [ ] Phase 1 independently delivers secure upload, Google Document AI extraction, manual review/correction, duplicate handling, and persisted receipt headers/line items in Postgres; it does not wait for Square, recipes, inventory, dashboards, tax, or WhatsApp.
+- [ ] Phase 1 independently delivers secure upload, local Tesseract + OpenCV extraction, manual review/correction, duplicate handling, and persisted receipt headers/line items in Postgres; it does not wait for Google, Square, recipes, inventory, dashboards, tax, or WhatsApp.
 - [ ] Persist required/available OCR fields from Feature 1.4 and preserve the complete raw response and normalized receipt document per Capability 2.1. Store the original image/PDF in protected persistent file storage.
 - [ ] Receipt review in MVP 1 supports all four business dispositions. Uncertain lines may remain Unclassified drafts without blocking receipt persistence; do not post them until reviewed.
 - [ ] Implement thin receipt-linked ingredient-purchase, ordinary-expense, and asset records plus minimal Ingredient/Recipe records in MVP 1. Full product setup, costing, depreciation, weekly operations, and inventory valuation remain later work.
 - [ ] MVP acceptance: a manager can upload a receipt, see OCR/task status, correct extracted header/items, save, and retrieve the record after app restart from Postgres; duplicate uploads are detected and audited.
+
+## Future Enhancement — Optional Google Document AI (outside MVP 1 completion)
+- [ ] 🧑‍💻 Before enabling Document AI, create/configure a Google Cloud project and Expense Parser, review current [pricing](https://cloud.google.com/document-ai/pricing) and regional data-handling terms, and approve a monthly budget alert.
+- [ ] Complete the real-data privacy, retention, malware-scanning, and provider-approval items in [the implementation-readiness gate](../02-implementation-readiness.md) before sending real receipts to Google; store credentials and processor/region IDs only in deployment secrets, never in source or `tbl_settings`.
+- [ ] Implement and separately test `DocumentAIEngine` behind the same `OCREngine` boundary, including uncertain-submission reconciliation and cost-aware retries.

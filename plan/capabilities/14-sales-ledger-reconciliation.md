@@ -14,7 +14,7 @@ Bounded context: `src/mbs/sales/`. Owns the canonical sales facts and financial 
 ## Feature 14.2 — Square Line Acceptance
 - [ ] Feature complete
 - [ ] Promote staged Square order lines from Capability 3 only when the Variation ID has a Product Setup record and effective product cost for the sale date, and the Location ID/date resolves to a dated market visit or explicit non-market channel. For a market assignment, the Square sale timestamp must also fall within that market's effective-dated local operating hours from Capability 5, unless an authorized exception is recorded.
-- [ ] Keep a Square transaction visible as `PROVIDER_PENDING` from its market-day capture until its Order is durably staged and accepted or rejected. Pending provider facts contribute only to clearly labeled pending closeout totals; they are never reported as settled or silently omitted from a closeout.
+- [ ] Show `PROVIDER_PENDING` only when a provider identity has been registered and can be correlated to a later Square Order. A separate Square POS transaction without that identity is not a locally captured fact: show sync watermark/staleness until imported. If its Location/date/hours match multiple sessions or none, retain an import exception for authorized assignment; do not invent a pending amount, guess the session, or mark it settled.
 - [ ] Accept passing lines and keep failing lines in a visible `IMPORT_EXCEPTION` queue with reason, source IDs, and retry history; one failing line must not block other passing lines. Corrected exceptions can be promoted idempotently.
 - [ ] Persist an accepted line, resolved market/channel, effective-cost/COGS snapshot, and source links in one database transaction protected by the source uniqueness constraint.
 - [ ] Square refunds/returns reverse financial sales amounts but never restock inventory automatically. Any physically returned/resalable quantity requires a separate audited manual stock adjustment linked to the refund/return.
@@ -36,6 +36,7 @@ Bounded context: `src/mbs/sales/`. Owns the canonical sales facts and financial 
 - [ ] Allocate Square payouts to one or more market sessions using retained order/payment identities. Model operational close separately from settlement reconciliation so delayed, partial, or multi-session payouts remain visible exceptions rather than blocking cash closeout or being treated as settled.
 - [ ] Reconcile manual cash/other sales separately from Square settlement totals and include both sources in common business reporting and tax-source queries.
 - [ ] Accept market-session metadata, device/session identity, and source-event idempotency keys from Capability 16; these identify the operational capture context but never replace the canonical sale identity.
+- [ ] Before MVP 2 implementation, approve the Square POS-to-session correlation workflow (D-16) and the shared stock source-event contract (D-17) in the go/no-go decision sheet; test late/unmatched provider Orders and one physical stock effect per accepted sale.
 
 ## Feature 14.5 — Sales Exceptions & Tests
 - [ ] Feature complete

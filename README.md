@@ -20,7 +20,7 @@ uv run --frozen mypy src tests
 uv run --frozen uvicorn mbs.main:app --port 8000   # then GET http://127.0.0.1:8000/health
 ```
 
-Docker Compose (web, postgres, redis, celery-worker, celery-beat) — **not yet verified; requires Docker Desktop**:
+Docker Compose (web, postgres, redis, celery-worker, celery-beat) — verified 2026-09-30 with Docker Desktop 29.8.1 on Windows 11 (see [the Windows Docker guide](user-docs/Docker_Windows11_Installation_Guide.md)):
 
 ```bash
 cp .env.example .env
