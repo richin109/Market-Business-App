@@ -9,6 +9,7 @@ Every slice must satisfy all of these rules before its checkbox is checked:
 - **Scope:** implement only the named bounded context and its listed interfaces.
 - **Dependencies:** confirm the preceding migration, service contract, owner decisions, and test fixtures exist.
 - **Acceptance:** add focused unit/integration tests using synthetic data or provider mocks; add Playwright tests for changed browser UI.
+- **Receipt-derived acceptance:** when a slice consumes approved receipt lines, first prove its accounting, stock, and reporting effects with committed synthetic fixtures. Include an RM-025 changed-image replay where five existing orders remain stable while later versions add five at a time: only newly approved line occurrences may create cost, inventory, expense, dashboard, or tax facts. After the real-data gate authorizes RM-024, also run a separate isolated local evaluation against the private `receipts/` corpus for that slice's affected boundary, but only for entries with human-reviewed dispositions, units/conversions, expected postings, and applicable business/tax mappings. Missing annotations remain review holds, not passing facts. Keep the original files, expectations, and identifiable logs out of git/CI; carry only approved redacted aggregate evidence into the profile.
 - **Traceability:** link applicable manifest IDs or add a focused test name to `03-current-slice.md`; planned manifest rows are not evidence.
 - **Schema:** add SQLAlchemy models and a reviewed Alembic migration for every schema change; test a fresh database and an upgrade from the prior revision.
 - **Validation:** run the focused test first, then `uv run --frozen ruff check src tests`, `uv run --frozen mypy src tests`, and `uv run --frozen pytest`. Run the same profile inside the pinned Compose candidate when the slice changes deployment or release behavior.
@@ -31,13 +32,13 @@ Owner decisions required before the first slice: D-01, D-02, D-03, D-04, D-05, D
 
 ## MVP 3 — Products, Recipes, and Costing
 
-Prerequisites: MVP 2 accepted Variation IDs and market identity; approve D-20, D-26, D-27, D-28, D-29, D-30, and D-31.
+Prerequisites: MVP 2 accepted Variation IDs and market identity; approve D-20, D-26, D-27, D-28, D-29, D-30, D-31, and D-35.
 
 | Slice | Bounded outcome | Acceptance and traceability |
 |---|---|---|
-| 3.1 | Units, product master, and readiness status | Extend the MVP 1 unit/alias catalog into the approved unit/dimension registry with same-dimension global factors and effective-dated per-item conversions (Capability 4.9; CO-001), Decimal precision, Variation ID product records, product status rules, perishability defaults, target stock, and customer-facing fields. Cover RT051-RT060 and RT070 with isolated fixtures. |
-| 3.2 | Recipes, supplies, and cost engine | Add recipe/product/ingredient/supply mappings, compatible conversions, waste percentages and fractional remainder behavior, effective-dated ingredient/product costs, preferred sources, and REVIEW COST status. Cover RT061-RT069 and boundary tests. |
-| 3.3 | Purchases, receipt links, migration, and opening counts | Route manual/OCR purchases through one approval service, normalize package count × pack size × pack unit to the item base unit (blocking lines with no conversion path), write one stock movement and cost-history row with the conversion versions used, replay MVP 1 links without duplication, and apply D-31 opening-count semantics. Test rollback, late movements, and source lineage. |
+| 3.1 | Units, product master, and readiness status | Extend the MVP 1 unit/alias catalog into the approved unit/dimension registry with same-dimension global factors and effective-dated per-item conversions (Capability 4.9; CO-001), Decimal precision, Variation ID product records linked to their canonical `item_id` and existing store-item mappings, product status rules, required per-item Shelf Life (`days`/`weeks`/`months`/`never`) remembered as the item default, target stock, and customer-facing fields. Test that an item without a shelf life cannot be stocked and that legacy `is_perishable` values migrate per D-20. Cover SL-001, RT051-RT060, and RT070 with isolated fixtures. |
+| 3.2 | Recipes, supplies, and cost engine | Add recipe/product/ingredient/supply mappings, compatible conversions, a mandatory recipe output shelf life (`never` permitted) that overrides the product's own shelf life for produced lots, waste percentages and fractional remainder behavior, effective-dated ingredient/product costs, preferred sources, and REVIEW COST status. Cover SL-002, RT061-RT069, and boundary tests. |
+| 3.3 | Purchases, receipt links, migration, and opening counts | Route manual/OCR purchases through one approval service keyed by accepted receipt-line occurrence, not PDF or merchant item number; resolve every purchase to a canonical `store_id` and canonical `item_id` from the MVP 1 registries rather than typed store/item text, and block posting for an unmapped store item; preserve every linked source/page and personal-line exclusion across MVP 1 migration. Normalize package count × pack size × pack unit to the item base unit (blocking lines with no conversion path), write one stock movement and cost-history row per approved line with conversion versions, replay MVP 1 links without duplication, and apply D-31 opening-count semantics. Test supplemental repeated-product lines, overlapping copies, rollback, late movements, and source lineage (RM-022; CO-001). |
 
 **MVP 3 profile:** `costing-mvp` proves migration replay/rollback, unit and rounding rules, purchase parity, recipe waste accumulation, and opening-balance reconciliation before release.
 
@@ -48,7 +49,7 @@ Prerequisites: MVP 3 stock inputs and D-17/D-32 balance contract. Meta calls rem
 | Slice | Bounded outcome | Acceptance and traceability |
 |---|---|---|
 | 4.1 | Shared stock reader and production service | Implement one `StockBalanceReader`, one production-event identity, atomic movement posting, retry/concurrency/rollback behavior, and no stock effect for unconfirmed plans. Test allocation is not subtracted twice. |
-| 4.2 | Market load and store-grouped shopping | Calculate recipe/supply requirements, expected waste, as-of balance subtraction, store grouping, expiry handling, copy-previous behavior, print/export, and explicit purchase posting. Test missing recipes, incompatible units, and no-plan-side-effects. |
+| 4.2 | Market load and store-grouped shopping | Calculate recipe/supply requirements, expected waste, as-of balance subtraction, grouping by canonical store from the MVP 1 registry so grouped alias spellings produce one list, shelf-life-derived `Perishable By` and expired-lot exclusion, copy-previous behavior, print/export, and explicit purchase posting. Match an OCR-approved receipt-line purchase to an existing shopping-list item instead of posting another manual purchase; never use a held PDF or unreviewed weight/size as stock. Test missing recipes, missing shelf life, incompatible units, supplemental/replayed lines, and no-plan-side-effects (SL-003; RM-022). |
 | 4.3 | WhatsApp manual batches | Implement consent-aware recipient/template validation, minimum-two manual recipients, private per-recipient messages, cost threshold, idempotent attempts, webhook status handling, and print fallback. Test all sends with Meta mocks; no real recipients in CI. |
 
 **MVP 4 profile:** `prep-mvp` covers 4.1-4.3, Playwright list/confirmation/send flows, and the approved balance, atomicity, consent, and messaging evidence.
@@ -61,19 +62,19 @@ Prerequisites: MVP 2 visit identity and MVP 4 shared production service. Approve
 |---|---|---|
 | 5.1 | Market costs, visits, and attendance | Add immutable effective-dated market costs, attendance vocabulary, visit replay identity, closed/exception dates, and history. Cover RT071-RT074 and RT077-RT082. |
 | 5.2 | Directed route legs and allocations | Add reusable directed legs, Home/direct itinerary selection, effective mileage rates, audited overrides, and exact allocation summing to trip cost. Cover RT075-RT076 and route boundary tests. |
-| 5.3 | Weekly production, expenses, and assets | Extend the shared production service with corrections, samples, expense provenance, receipt/manual parity, capital-asset drafts, and unallocated-expense reporting. Test retries, corrections, and no duplicate COGS/expense posting. |
+| 5.3 | Weekly production, expenses, and assets | Extend the shared production service with corrections, samples, expense provenance by accepted receipt-line occurrence and source page, receipt/manual parity, personal/mixed-use exclusion, capital-asset drafts, and unallocated-expense reporting. Test retries, supplemental-source replay, corrections, and no duplicate COGS/expense posting (RM-022). |
 
 **MVP 5 profile:** `markets-mvp` proves visit migration, route allocation, production corrections, expense idempotency, asset routing, and responsive weekly-entry workflows.
 
 ## MVP 6 — Inventory and Reorder
 
-Prerequisites: accepted sales, approved purchases, production movements, and D-20/D-21/D-33 approval.
+Prerequisites: accepted sales, approved purchases, production movements, and D-20/D-21/D-33/D-35/D-36 approval.
 
 | Slice | Bounded outcome | Acceptance and traceability |
 |---|---|---|
-| 6.1 | Movement ledgers and weekly snapshots | Implement signed product/ingredient/supply movements, period snapshots, test-record exclusion, and reconciliation to source events. Cover RT026-RT035, RT043, and RT048-RT050. |
-| 6.2 | Expiry, spoilage, close, and restatement | Implement known-date expiry, unknown-date weekly waste, non-perishable carry-forward, immutable closes, late-event restatements, and idempotent rebuilds. Test DST and subsecond boundaries without double waste. |
-| 6.3 | Reorder and low-stock alerts | Implement explicit safety-stock quantity, unit-consistent reorder calculations, last-source recommendations, 20% threshold crossing/re-arm, consent/template checks, and no alerts for perishables. Test WhatsApp with mocks. |
+| 6.1 | Movement ledgers and weekly snapshots | Implement signed product/ingredient/supply movements keyed to approved receipt-line occurrences for purchases (not source file), period snapshots, test-record exclusion, and reconciliation to source events. Include repeated-product supplements, overlapping-copy exclusion, and late approved-line restatements; cover RM-022, RT026-RT035, RT043, and RT048-RT050. |
+| 6.2 | Expiry, spoilage, close, and restatement | Implement per-lot `Perishable By` derivation, the startup plus interval expiry job, carry-forward of unexpired and `never` stock, immutable closes, late-event restatements, shelf-life-change recomputation, and idempotent rebuilds. Test DST, month-end, and subsecond boundaries, stopped-system catch-up, and overlapping runs without double waste. Cover SL-003 and SL-004. |
+| 6.3 | Reorder and low-stock alerts | Implement explicit safety-stock quantity, unit-consistent reorder calculations, last-source recommendations, 20% threshold crossing/re-arm, consent/template checks, and alert eligibility limited to `never` or shelf life at or above `low_stock_alert_min_shelf_life_days`. Test WhatsApp with mocks and cover SL-004. |
 
 **MVP 6 profile:** `inventory-mvp` proves all stock classes reconcile through close/restatement, reorder outputs match approved formulas, and alert events are idempotent and consent-checked.
 
@@ -83,7 +84,7 @@ Prerequisites: MVP 6 snapshots and D-23, D-24, D-25, D-26, and D-27 approval. Th
 
 | Slice | Bounded outcome | Acceptance and traceability |
 |---|---|---|
-| 7.1 | Refresh runs, watermarks, and lineage | Add refresh-run identity, dependency ordering, source watermarks, atomic publication, stale/failed states, drill-through lineage, and test-record filters. Implement application equivalents for structural/meta cases RT001-RT025, RT036-RT042, RT065-RT068, RT083-RT085, RT087-RT088, and RT108-RT109. |
+| 7.1 | Refresh runs, watermarks, and lineage | Add refresh-run identity, dependency ordering, source watermarks, atomic publication, stale/failed states, drill-through lineage, and test-record filters. For receipt-derived costs and expenses count accepted canonical orders/lines rather than PDFs; expose all source evidence without multiplying KPI totals. Implement application equivalents for structural/meta cases RT001-RT025, RT036-RT042, RT065-RT068, RT083-RT085, RT087-RT088, and RT108-RT109 (RM-022). |
 | 7.2 | Scorecards, rankings, opportunity, and forecasts | Implement approved product lifecycle, market ranks, manager-entered opportunity inputs, deterministic tie-breaks, forecast history rules, and D-27 fixed as-of behavior. Cover RT013-RT021, RT051-RT070, and RT083-RT088. |
 | 7.3 | Operations/executive dashboards and release evidence | Add responsive dashboard pages/charts, health score, KPI source drill-through, six-control reporting, and all remaining workbook application equivalents including RT091-RT110. Structural cases become behavior/schema/config assertions, never formula-presence checks. |
 
@@ -96,7 +97,7 @@ Prerequisites: all preceding profiles pass; U-6 and U-7; approved tax-year mappi
 | Slice | Bounded outcome | Acceptance and traceability |
 |---|---|---|
 | 8.1 | Tax profile and effective mappings | Add entity/year/jurisdiction profile, preparer-reviewed tax mappings, applicability rules, Florida conditional obligations, and encrypted identifiers. Test supported-year selection and no Florida individual-income form. |
-| 8.2 | Reconciliation and frozen workpapers | Reconcile Square/manual sales, 1099-K, refunds, tax, COGS, inventory, expenses, assets, mileage, and payments; produce source-linked PDF/XLSX/CSV schedules and immutable year snapshots. Block on missing provider coverage or tax decisions. |
+| 8.2 | Reconciliation and frozen workpapers | Reconcile Square/manual sales, 1099-K, refunds, tax, COGS, inventory, expenses, assets, mileage, and payments; trace each accepted receipt-line amount through one canonical order to all supporting PDFs and exclude duplicate copies, personal lines, and unresolved source gaps. Produce source-linked PDF/XLSX/CSV schedules and immutable year snapshots; block on missing provider coverage or tax decisions (RM-022). |
 | 8.3 | Certification and production promotion | Add close checklist, six workbook controls, tax approval/coverage controls, full profile composition, backup/restore, migration rollback, worker drain, immutable image/digest promotion, and production smoke tests. No direct filing or tax-liability advice. |
 
 **MVP 8 profile:** `full-mbs` runs all preceding profiles, all 110 source equivalents, tax-specific tests, security, restore, rollback, and deployment evidence. A missing tax-professional approval or provider coverage certificate is a permanent production stop.

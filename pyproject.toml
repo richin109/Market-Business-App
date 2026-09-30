@@ -32,7 +32,7 @@ packages = ["src/mbs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100
@@ -44,6 +44,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+"support/review_receipts.py" = ["S603"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -10,6 +10,8 @@ Bounded context: `mbs/reporting/` dashboard layer (blueprint §8 Dashboard layer
 - [ ] `etl/dashboard/exec_kpis.py` equivalent: pre-aggregate Executive Dashboard KPIs (weekly/monthly/YTD revenue, profit, margin).
 - [ ] Both run only after Product Master and Inventory/Rankings layers succeed (Governance Rule 4 refresh sequence).
 - [ ] Give every dashboard refresh a run ID, source-watermark timestamp, covered business-date range, status, and source-record counts. Publish Operations and Executive KPI snapshots atomically only when all required upstream inputs succeed; retain the prior published snapshot with a visible stale/failed status when a refresh is partial or fails.
+- [ ] Aggregate purchase, cost, and expense KPIs by canonical `store_id` and canonical `item_id`, so grouped store aliases and per-store descriptions roll up as one store and one item; show display names and common names for presentation only and keep drill-through to the underlying store item and printed description.
+- [ ] Count receipt import activity by file/job separately from canonical orders and approved line occurrences. Dashboard cost, expense, stock, and profit aggregates consume only accepted business records, never copies or held OCR lines; drill-through retains the contributing receipt and source-file/page evidence without multiplying a purchase by its PDF count (RM-022).
 
 ## Feature 8.2 — Operations Dashboard
 - [ ] Feature complete

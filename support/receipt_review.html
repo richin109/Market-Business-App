@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Receipt review</title>
+  <style>
+    :root { font-family: Georgia, serif; color: #1e2929; background: #f4f4f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { display: flex; align-items: center; gap: 1rem; padding: .7rem 1.2rem; background: #113e3b; color: white; flex-wrap: wrap; }
+    h1 { margin: 0 auto 0 0; font-size: 1.15rem; }
+    button, select, input, textarea { font: inherit; }
+    button { background: #e5a639; border: 0; padding: .55rem .8rem; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    select { max-width: min(45vw, 28rem); padding: .45rem; }
+    main { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); min-height: calc(100vh - 4rem); }
+    .preview { background: #525c5b; min-height: 75vh; }
+    .preview object { width: 100%; height: calc(100vh - 4.5rem); min-height: 75vh; }
+    .review { padding: 1.2rem; overflow: auto; max-height: calc(100vh - 4rem); }
+    .review h2 { font-size: 1.1rem; overflow-wrap: anywhere; margin-top: 0; }
+    label { display: block; margin: .7rem 0; font-size: .9rem; }
+    input:not([type="checkbox"]) { display: block; width: 100%; min-width: 0; margin-top: .25rem; padding: .4rem; border: 1px solid #8d9993; background: white; color: #1e2929; }
+    .items-head { display: flex; justify-content: space-between; align-items: center; margin-top: 1.4rem; }
+    .items-head h3 { margin: 0; font-size: 1rem; }
+    .item-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 2rem; gap: .25rem .4rem; padding: .65rem 0; border-bottom: 1px solid #c7cfca; }
+    .item-row label { min-width: 0; margin: 0; font-size: .76rem; }
+    .item-row label:first-child { grid-column: 1 / 4; }
+    .item-row label:nth-child(2) { grid-column: 4 / 6; }
+    .item-row label:nth-child(3) { grid-column: 1; }
+    .item-row label:nth-child(4) { grid-column: 2; }
+    .item-row label:nth-child(5) { grid-column: 3 / 5; }
+    .item-row input { margin-top: .15rem; }
+    .item-row button { align-self: end; width: 2rem; height: 2rem; padding: 0; background: transparent; color: #a0251b; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .78rem/1.4 Consolas, monospace; background: #e6e9e5; padding: .8rem; max-height: 14rem; overflow: auto; }
+    .error { color: #a0251b; min-height: 1.3rem; }
+    @media (max-width: 800px) { main { display: block; } .preview object { height: 55vh; min-height: 0; } .preview { min-height: 0; } .review { max-height: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Receipt review</h1>
+    <button id="previous" title="Previous receipt" aria-label="Previous receipt">&#8592;</button>
+    <select id="files" aria-label="Receipt"></select>
+    <button id="next" title="Next receipt" aria-label="Next receipt">&#8594;</button>
+    <button id="save" title="Save this receipt's expected results">Save receipt</button>
+  </header>
+  <main>
+    <div class="preview" id="preview"></div>
+    <section class="review">
+      <h2 id="name"></h2>
+      <label>Store<input id="store"></label>
+      <label>Date (YYYY-MM-DD)<input id="date"></label>
+      <label>Time (HH:MM:SS)<input id="time"></label>
+      <label>Transaction number<input id="transaction_number"></label>
+      <label>Subtotal<input id="subtotal"></label>
+      <label>Tax<input id="tax"></label>
+      <label>Total<input id="total"></label>
+      <label>Payment method<input id="payment_method"></label>
+      <div class="items-head"><h3>Items <span id="item-count"></span></h3><button id="add-item" title="Add item" aria-label="Add item">+</button></div>
+      <div id="items"></div>
+      <label><input id="reviewed" type="checkbox"> Reviewed against the receipt</label>
+      <p id="error" class="error" role="alert"></p>
+      <details><summary>Extracted PDF text</summary><pre id="text"></pre></details>
+    </section>
+  </main>
+  <script>
+    const entries = __RECEIPTS__;
+    const fields = ["store", "date", "time", "transaction_number", "subtotal", "tax", "total", "payment_method"];
+    const files = document.getElementById("files");
+    const error = document.getElementById("error");
+    let index = 0;
+    let resultsDirectory;
+    entries.forEach((entry, position) => {
+      const option = document.createElement("option");
+      option.value = position;
+      option.textContent = entry.file;
+      files.append(option);
+    });
+    function capture() {
+      if (!entries.length) return true;
+      const items = [...document.querySelectorAll("#items .item-row")].map(row => ({
+        ...JSON.parse(row.dataset.original),
+        description: row.querySelector('[data-field="description"]').value.trim(),
+        item_number: row.querySelector('[data-field="item_number"]').value.trim() || null,
+        size: row.querySelector('[data-field="size"]').value.trim() || null,
+        quantity: row.querySelector('[data-field="quantity"]').value.trim() || null,
+        line_total: row.querySelector('[data-field="line_total"]').value.trim(),
+      }));
+      fields.forEach(field => {
+        entries[index].expected[field] = document.getElementById(field).value.trim() || null;
+      });
+      entries[index].expected.items = items;
+      entries[index].reviewed = document.getElementById("reviewed").checked;
+      error.textContent = "";
+      return true;
+    }
+    function updateCount() {
+      document.getElementById("item-count").textContent = `(${document.querySelectorAll("#items .item-row").length})`;
+    }
+    function addItem(item = {}) {
+      const row = document.createElement("div");
+      row.className = "item-row";
+      row.dataset.original = JSON.stringify(item);
+      for (const [field, name] of [["description", "Description"], ["item_number", "Item #"], ["size", "Size"], ["quantity", "Quantity"], ["line_total", "Line total"]]) {
+        const label = document.createElement("label");
+        label.textContent = name;
+        const input = document.createElement("input");
+        input.dataset.field = field;
+        input.value = item[field] ?? "";
+        label.append(input);
+        row.append(label);
+      }
+      const remove = document.createElement("button");
+      remove.textContent = "×";
+      remove.title = "Remove item";
+      remove.setAttribute("aria-label", "Remove item");
+      remove.addEventListener("click", () => { row.remove(); updateCount(); });
+      row.append(remove);
+      document.getElementById("items").append(row);
+      updateCount();
+    }
+    function show(position) {
+      index = position;
+      const entry = entries[index];
+      files.value = index;
+      document.getElementById("name").textContent = entry.file;
+      fields.forEach(field => {
+        document.getElementById(field).value = entry.expected[field] ?? "";
+      });
+      document.getElementById("items").replaceChildren();
+      (entry.expected.items ?? []).forEach(addItem);
+      updateCount();
+      document.getElementById("reviewed").checked = entry.reviewed;
+      document.getElementById("text").textContent = entry.extracted_text || "No extractable PDF text.";
+      const preview = document.getElementById("preview");
+      preview.replaceChildren();
+      const object = document.createElement("object");
+      object.data = encodeURIComponent(entry.file);
+      object.type = entry.media_type;
+      preview.append(object);
+      document.getElementById("previous").disabled = index === 0;
+      document.getElementById("next").disabled = index === entries.length - 1;
+    }
+    function navigate(position) {
+      if (capture()) show(position);
+      else files.value = index;
+    }
+    files.addEventListener("change", () => navigate(Number(files.value)));
+    document.getElementById("add-item").addEventListener("click", () => addItem());
+    document.getElementById("previous").addEventListener("click", () => navigate(index - 1));
+    document.getElementById("next").addEventListener("click", () => navigate(index + 1));
+    document.getElementById("save").addEventListener("click", async () => {
+      if (!capture()) return;
+      const {file, expected, reviewed, result_file} = entries[index];
+      const content = JSON.stringify({file, expected, reviewed}, null, 2) + "\n";
+      if (window.showDirectoryPicker || window.showSaveFilePicker) {
+        try {
+          let handle;
+          if (window.showDirectoryPicker) {
+            resultsDirectory ??= await window.showDirectoryPicker({mode: "readwrite"});
+            handle = await resultsDirectory.getFileHandle(result_file, {create: true});
+          } else {
+            handle = await window.showSaveFilePicker({suggestedName: result_file, types: [{description: "JSON", accept: {"application/json": [".json"]}}]});
+          }
+          const writable = await handle.createWritable();
+          await writable.write(content);
+          await writable.close();
+          error.textContent = `Saved ${result_file}`;
+          return;
+        } catch (problem) {
+          if (problem.name === "AbortError") return;
+          error.textContent = `Could not save: ${problem.message}`;
+          return;
+        }
+      }
+      const url = URL.createObjectURL(new Blob([content], {type: "application/json"}));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result_file;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      error.textContent = `Downloaded ${result_file}`;
+    });
+    if (entries.length) show(0);
+  </script>
+</body>
+</html>
