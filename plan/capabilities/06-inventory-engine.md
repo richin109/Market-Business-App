@@ -12,6 +12,7 @@ Bounded context: `mbs/inventory/` (blueprint §3.1 #2, Modules 5, 15–16). Week
 - [ ] Flow fields: Beginning + Restocks + Produced − Square Sales − Manual Sales − Samples − Spoilage + Count Variance = Ending. Beginning is the prior period's ending except for the initial audited opening count; Count Variance is an explicit signed adjustment from a dated physical count, not an unexplained balancing plug.
 - [ ] Populate Produced from shared production events and Sold from accepted Square Orders plus manual sales; populate restocks from approved product purchases. Keep physical counts and corrections auditable and prevent refresh/replay from adding quantities twice.
 - [ ] Reconcile every snapshot to the signed movement ledger and display the physical-count variance and resulting adjustment separately; surface missing or inconsistent source movements rather than silently balancing the snapshot.
+- [ ] Close a weekly period as an immutable snapshot. A late sale/refund, purchase, count adjustment, or production correction for a closed period appends a linked restatement version; rebuild affected later snapshots from idempotent ledger events and retain the original close, reason, actor, and superseding version. Never create spoilage twice or silently revise a previously reported close.
 - [ ] `GET/POST` inventory endpoints per blueprint §9.5.
 
 ## Feature 6.2 — Spoilage & Carry-Forward
@@ -20,6 +21,7 @@ Bounded context: `mbs/inventory/` (blueprint §3.1 #2, Modules 5, 15–16). Week
 - [ ] Run a scheduled expiry job that records one idempotent waste movement when any product, ingredient, or supply lot reaches its known `Perishable By`; do not wait until Monday to recognize already-expired stock. For perishable purchase lots with no known date, the weekly close wastes remaining quantity. The Monday close also wastes any known-date perishable lot whose date has not yet expired.
 - [ ] Non-perishable rule: valid Ending Inventory rolls to the next week's Beginning Inventory. Preserve the distinction between true inventory variance and perishable waste in reports.
 - [ ] Celery-beat scheduled job to create next week's snapshot rows automatically each Monday (matches the Kubernetes `inventory-snapshot` CronJob concept from the blueprint, run instead via celery-beat regardless of deployment target).
+- [ ] Test late and corrected events across a weekly close, proving exactly one waste movement, a linked restatement, correctly rebuilt downstream opening/ending balances and valuation, and correct low-stock alert re-arm behavior.
 
 ## Feature 6.3 — Inventory Valuation
 - [ ] Feature complete

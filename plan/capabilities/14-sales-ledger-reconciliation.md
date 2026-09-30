@@ -14,6 +14,7 @@ Bounded context: `src/mbs/sales/`. Owns the canonical sales facts and financial 
 ## Feature 14.2 — Square Line Acceptance
 - [ ] Feature complete
 - [ ] Promote staged Square order lines from Capability 3 only when the Variation ID has a Product Setup record and effective product cost for the sale date, and the Location ID/date resolves to a dated market visit or explicit non-market channel. For a market assignment, the Square sale timestamp must also fall within that market's effective-dated local operating hours from Capability 5, unless an authorized exception is recorded.
+- [ ] Keep a Square transaction visible as `PROVIDER_PENDING` from its market-day capture until its Order is durably staged and accepted or rejected. Pending provider facts contribute only to clearly labeled pending closeout totals; they are never reported as settled or silently omitted from a closeout.
 - [ ] Accept passing lines and keep failing lines in a visible `IMPORT_EXCEPTION` queue with reason, source IDs, and retry history; one failing line must not block other passing lines. Corrected exceptions can be promoted idempotently.
 - [ ] Persist an accepted line, resolved market/channel, effective-cost/COGS snapshot, and source links in one database transaction protected by the source uniqueness constraint.
 - [ ] Square refunds/returns reverse financial sales amounts but never restock inventory automatically. Any physically returned/resalable quantity requires a separate audited manual stock adjustment linked to the refund/return.
@@ -32,6 +33,7 @@ Bounded context: `src/mbs/sales/`. Owns the canonical sales facts and financial 
 - [ ] Join Square Payments to canonical Square Orders for tender, refunds, and actual processing fees; handle multiple tenders and partial refunds idempotently without creating sales facts from Payment records.
 - [ ] If actual fee details are unavailable, calculate a clearly labeled effective-dated estimate using `(gross × square_fee_rate) + (transaction count × square_fee_fixed_amount)`; keep estimated and actual fees separate.
 - [ ] Reconcile order amounts, discounts, refunds, Square-reported tax, Payments, and net deposits. This is transaction reconciliation only; taxability decisions, liability calculations, and filing workpapers remain in Capability 12.
+- [ ] Allocate Square payouts to one or more market sessions using retained order/payment identities. Model operational close separately from settlement reconciliation so delayed, partial, or multi-session payouts remain visible exceptions rather than blocking cash closeout or being treated as settled.
 - [ ] Reconcile manual cash/other sales separately from Square settlement totals and include both sources in common business reporting and tax-source queries.
 - [ ] Accept market-session metadata, device/session identity, and source-event idempotency keys from Capability 16; these identify the operational capture context but never replace the canonical sale identity.
 

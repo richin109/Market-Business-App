@@ -1,0 +1,44 @@
+Devin Project Prompt - Market Business System (MBS) v3.3
+Objective: Build a production-ready Java web application that replaces the functionality defined in the Excel workbook Market Business System v3.3.
+
+Technology Stack: Java 21, Spring Boot 3.x, Spring Security, Spring Data JPA, Hibernate, PostgreSQL, React, TypeScript, Material UI, JasperReports, Apache POI, Docker, Kubernetes, GitHub Actions.
+
+Core Modules:
+1. Product Management
+2. Recipe Management
+3. Ingredient Cost History
+4. Product Cost Engine
+5. Inventory Management
+6. Market Management
+7. Weekly Market Entry
+8. Travel Cost Calculation
+9. Square Sales Integration
+10. Sales & Profitability
+11. Product Scorecards
+12. Market Rankings
+13. Market Opportunity Engine
+14. Forecasting
+15. Reorder Engine
+16. Inventory Valuation
+17. Data Quality Dashboard
+18. Executive Dashboard
+19. Operations Dashboard
+20. Release Certification Module
+21. Automated Testing Framework (110 regression tests).
+
+Security: JWT authentication with ADMIN, MANAGER, VIEWER roles.
+
+Deliverables:
+- Spring Boot backend
+- React frontend
+- PostgreSQL schema
+- Swagger/OpenAPI docs
+- Docker deployment
+- CI/CD pipeline
+- Unit and integration tests
+- Seed data from workbook fixtures
+
+Additional Instruction:
+Use the workbook as the source of truth for all business rules. Generate a Domain-Driven Design architecture with bounded contexts for Products, Inventory, Markets, Sales, Forecasting, Governance, and Reporting. Design the platform for future multi-tenant SaaS migration.
+
+Refer to the attached workbook for detailed formulas, entities, dashboards, governance rules, data dictionary definitions, and all 110 regression tests.

@@ -25,7 +25,7 @@ Covers storage and lifecycle of receipts once captured by Capability 1 — listi
 ## Feature 2.3 — Deletion & Audit
 - [ ] Feature complete
 - [ ] `DELETE /api/v1/receipts/{receipt_pk}` — soft delete only (sets `deleted_at`); no immediate hard-delete endpoint exists (ADMIN only). A separate audited purge service applies the configured retention policy; if no retention period is configured, no automatic purge occurs.
-- [ ] Configure retention periods separately for source files, raw OCR payloads, canonical receipt records, messaging content, and audit metadata. Purge is ADMIN-only, logged, honors legal/operational holds, and removes eligible data from primary storage; backup copies expire under the documented backup-retention schedule.
+- [ ] Configure the approved retention periods from [the implementation-readiness gate](../02-implementation-readiness.md) separately for source files, raw OCR payloads, canonical receipt records, messaging content, and audit metadata. Purge is ADMIN-only, logged, honors legal/operational holds, and removes eligible data from primary storage; backup copies expire under the documented backup-retention schedule.
 - [ ] Import audit log table capturing every upload attempt: timestamp, files submitted, existing count, new count, duplicates skipped, receipts added, errors — feeds the Governance/Testing release gate (Capability 9 & 10).
 
 ## Feature 2.4 — Web UI (Jinja2/HTMX)

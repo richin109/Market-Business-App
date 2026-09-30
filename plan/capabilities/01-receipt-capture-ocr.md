@@ -13,6 +13,7 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 
 - [ ] 🧑‍💻 Create/configure a Google Cloud project and Document AI Expense Parser, enable the API, review current [pricing](https://cloud.google.com/document-ai/pricing) and regional data-handling terms, and set an agreed monthly budget alert.
 - [ ] Store Google credentials and processor/region IDs only in deployment secrets; never commit them or store tokens in `tbl_settings`.
+- [ ] Do not send real receipt files to Google until the real-data privacy, retention, malware-scanning, and provider-approval items in [the implementation-readiness gate](../02-implementation-readiness.md) are complete.
 - [ ] Implement `OCREngine` and `DocumentAIEngine` as the configured MVP provider; keep Tesseract/OpenCV optional behind the same interface.
 - [ ] Capture the provider response, OCR schema/provider version, confidence, and page count on the first successful processing; persist them before marking the job complete.
 
@@ -37,7 +38,8 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 
 ## Feature 1.4 — OCR Data Field Extraction
 - [ ] Feature complete
-- [ ] Extract required header fields: Store, Date (MM/DD/YYYY), Time (HH:MM:SS), TC#/Receipt#, Total.
+- [ ] Preserve the provider's raw Date and Time values in the OCR payload, then normalize the canonical receipt date to ISO 8601 `YYYY-MM-DD` and the canonical receipt time to `HH:MM:SS`. Ambiguous, incomplete, or invalid source values require manual review and cannot be posted as business dates.
+- [ ] Extract required header fields: Store, Date, Time, TC#/Receipt#, Total.
 - [ ] Extract optional header fields: Subtotal, Tax, Payment Method.
 - [ ] Extract line items: Item Description (required), Line Total (required), UPC, Qty, Weight (lb), Unit Price (all optional per source formatting).
 - [ ] Validate extracted totals against sum of line totals; flag mismatches for manual review rather than silently accepting bad data.

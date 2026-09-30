@@ -23,6 +23,7 @@ Bounded context: `src/mbs/markets/` (blueprint §3.1 #3, Modules 6–8). Owns ma
 ## Feature 5.2 — Weekly Market Entry
 - [ ] Feature complete
 - [ ] `tblWeeklyMarkets`: one dated market-visit record per market occurrence, with Market Date, week-start date, attendance/status, score, notes, optional actual market-fee override, resolved market-cost period, and Test Record. Preserve the visit date and market so history and rankings can show which markets were actually done and when.
+- [ ] Give every market visit an immutable `market_visit_id` and enforce one visit per Market ID plus complete local business date. Migrating or replaying an MVP 2 dated visit must reuse that identity and preserve linked sales, prep, and session records; a conflicting duplicate is rejected rather than creating a second fee or attendance fact.
 - [ ] Link an optional Capability 16 market-day selling session and retain its open/close status, close exception state, and responsible operator without duplicating the visit or sales record.
 - [ ] Use a searchable dropdown backed by the distinct saved Market IDs/names in Market Master; selecting a market reuses its existing identity and loads the cost period effective for the selected visit date. Do not require retyping market details or create a duplicate market record from weekly entry.
 - [ ] Provide an `Add market` action for a genuinely new market that opens the Market Master creation flow, then returns to the weekly entry with the new market selected.
@@ -39,10 +40,12 @@ Bounded context: `src/mbs/markets/` (blueprint §3.1 #3, Modules 6–8). Owns ma
 - [ ] Apply the mileage rate effective on the market date (`mileage_rate`, initial default $0.67/mile); preserve historical cost results when the current rate changes (Capability 9).
 - [ ] Show each leg, its saved or newly entered one-way distance, itinerary choice, total miles, and calculated travel cost. Refresh totals when route order, home/direct choice, or an entered distance changes.
 - [ ] Allow an audited one-time actual-distance override for a leg without overwriting the saved default; offer an explicit action to save that actual as a new effective-dated route distance.
+- [ ] Test single-market, direct multi-market, and return-home itineraries, asserting that every final leg returns Home, the sum of market allocations equals the calculated trip cost exactly, and later mileage-rate changes do not alter finalized trips.
 
 ## Feature 5.4 — Weekly Production Entry
 - [ ] Feature complete
 - [ ] Create production events keyed by event/source identity, period, Variation ID, and entry identity with produced quantity, notes/exception reason, entry source, and Test Record flag. Capability 15 prep confirmations and manual weekly entries/corrections use this same ledger/service.
+- [ ] Deliver this shared production-event service as an explicit MVP 4 prerequisite; MVP 5 extends it with weekly entry UI and corrections but must not create a second production ledger.
 - [ ] Enforce a database unique source-event key; commit the production event, ingredient/product/supply movements, and fractional-waste remainder in one transaction. Retried confirmations return the existing result; a failed transaction leaves none of these effects posted.
 - [ ] Provide manual entry and audited correction through the shared production-event service; validated production quantities feed `tblInventory.Produced` for the matching week without duplicate aggregation. Corrections append a reversal/replacement or an explicit adjustment; they do not duplicate the original event.
 - [ ] Keep samples as a separately recorded inventory movement so they are not confused with produced or sold units.
@@ -51,10 +54,12 @@ Bounded context: `src/mbs/markets/` (blueprint §3.1 #3, Modules 6–8). Owns ma
 ## Feature 5.5 — Business Expense Entry
 - [ ] Feature complete
 - [ ] Create `tblExpenses` with expense date, amount, category, description, optional market/week allocation, receipt and receipt-item links, entry source (OCR/manual), approval audit, and Test Record flag.
+- [ ] Enforce a unique immutable provenance key for each receipt-item expense and manual expense event. Approval, retry, or correction appends a linked reversal/replacement instead of creating a second net expense.
 - [ ] Provide manual expense entry and correction using the same validation and audit rules as OCR-reviewed expense lines.
 - [ ] Include approved business expenses in the appropriate reporting period; ingredient purchases remain separate cost/inventory inputs to avoid counting purchases again on top of COGS.
 - [ ] Allow valid expenses to remain unallocated to a market and surface them as unallocated rather than silently dropping them from business totals.
 - [ ] Exclude ingredient purchases, Square fees, and market fees already recognized from duplicate posting as generic expenses; support `GET/POST /api/v1/expenses` and `PUT /api/v1/expenses/{id}` with MANAGER+ write authorization.
+- [ ] Test OCR approval retry, concurrent approval, manual submission retry, correction, and cross-path duplicate attempts, proving one net expense and retained source lineage.
 
 ## Feature 5.6 — Capital Asset / Equipment Tracking
 - [ ] Feature complete

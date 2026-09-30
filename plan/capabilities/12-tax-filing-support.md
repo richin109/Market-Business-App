@@ -38,10 +38,12 @@ Bounded context: `mbs/tax_reporting/`. Produces year-specific, reviewable busine
 ## Feature 12.4 — Review, Reconciliation & Export
 - [ ] Feature complete
 - [ ] Create a tax-year close checklist for missing receipts, unreviewed OCR items, unmatched 1099-K amounts, unresolved refunds, inventory counts/valuation, uncategorized expenses, asset disposals, mileage gaps, sales-tax exceptions, and tax payments.
+- [ ] Classify every close-checklist exception as blocking or advisory. Package generation and full-system production promotion require zero unresolved blocking exceptions for source coverage, tax mapping, gross-receipts/1099-K reconciliation, sales-tax reconciliation, inventory/COGS reconciliation, and owner/preparer-required decisions.
 - [ ] Preserve drill-through from every workpaper total to source Square order/payment, receipt line, purchase, expense, market visit, inventory record, asset, imported form, or manual adjustment.
 - [ ] Generate a versioned tax-year snapshot and export workbook/CSV schedules plus a source-document index for an authorized owner or preparer. Record who generated/reviewed the package, included records, unresolved exceptions, and export timestamp.
 - [ ] Allow corrections through auditable adjustments and generate a new snapshot; never silently rewrite a previously exported or reviewed tax package.
 - [ ] Require owner/preparer confirmation of tax classifications and filing decisions. No direct IRS/Florida e-filing, return signatures, tax-payment initiation, or automatic tax-liability advice in this capability.
+- [ ] Require a signed tax-professional approval record for each supported tax year before declaring its form mapping or calculation production-ready. Record the reviewer, tax year, official-instruction version, mapping/calculation scope, approval date, and exceptions; an absent or failed approval blocks that tax-year package and full-system promotion.
 
 ## Feature 12.5 — Data Protection & Tax-Year Controls
 - [ ] Feature complete

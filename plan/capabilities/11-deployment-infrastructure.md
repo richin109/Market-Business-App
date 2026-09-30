@@ -8,6 +8,7 @@
 - [ ] Feature complete
 - [ ] `docker-compose.yml` with services: `web` (FastAPI + Jinja2/HTMX app, hot reload), `postgres` (15-alpine, persistent volume), `redis` (7-alpine, Celery broker/result backend), `celery-worker`, `celery-beat`. No separate `react-frontend`/Node service — the web UI is served by the same FastAPI app.
 - [ ] `.env.example` documents Receipt MVP required variables (`DATABASE_URL`, `REDIS_URL`, persistent receipt-file store path, Google Document AI credentials/processor ID/region, JWT secret); Tesseract settings are optional fallback, and Square/Meta credentials are optional future-capability placeholders only.
+- [ ] Generate and commit a version-pinned Tailwind CSS static asset with the standalone CLI; serve it locally from the web/reverse-proxy layer in production. The production content-security policy must not require Tailwind CDN access.
 - [ ] 🧑‍💻 Install Docker Desktop (or Docker Engine + Compose) on this laptop if not already installed: https://docs.docker.com/get-docker/
 - [ ] `make`/script targets (or a simple `run.sh`) for `up`, `down`, `logs`, `migrate`, `test` to keep local workflow one-command simple.
 
@@ -19,6 +20,7 @@
 - [ ] Add a reverse proxy (Caddy recommended for automatic HTTPS with minimal config, or Nginx if you already run Nginx elsewhere): Caddy docs https://caddyserver.com/docs/ — terminates TLS and proxies to the FastAPI `web` service.
 - [ ] 🧑‍💻 If exposing outside the LAN, either configure port-forwarding + a DNS record you control, or use a tunnel service (e.g., Cloudflare Tunnel) instead of opening inbound ports directly: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 - [ ] Production recovery targets are RPO <= 24 hours and RTO <= 8 hours. Schedule encrypted database and receipt-file backups at least nightly, and run a timed restore test proving both targets; receipt images are business data and are not covered by a database-only backup.
+- [ ] Document the encrypted backup destination, retention, encryption-key owner and recovery procedure, and restore-test owner before storing real receipts. Complete the applicable real-data approvals in [the implementation-readiness gate](../02-implementation-readiness.md).
 - [ ] Secrets (DB credentials, JWT secret, Google/Square/Meta WhatsApp credentials) stored in an `.env` file with restricted file permissions on the VM, or a secrets manager if one is already in use; never committed to source control.
 
 ## Feature 11.3 — CI/CD Pipeline

@@ -9,6 +9,7 @@ Bounded context: `mbs/reporting/` dashboard layer (blueprint §8 Dashboard layer
 - [ ] `etl/dashboard/ops_kpis.py` equivalent: pre-aggregate Operations Dashboard KPIs (inventory status, reorder alerts, waste, spoilage).
 - [ ] `etl/dashboard/exec_kpis.py` equivalent: pre-aggregate Executive Dashboard KPIs (weekly/monthly/YTD revenue, profit, margin).
 - [ ] Both run only after Product Master and Inventory/Rankings layers succeed (Governance Rule 4 refresh sequence).
+- [ ] Give every dashboard refresh a run ID, source-watermark timestamp, covered business-date range, status, and source-record counts. Publish Operations and Executive KPI snapshots atomically only when all required upstream inputs succeed; retain the prior published snapshot with a visible stale/failed status when a refresh is partial or fails.
 
 ## Feature 8.2 — Operations Dashboard
 - [ ] Feature complete
@@ -22,8 +23,10 @@ Bounded context: `mbs/reporting/` dashboard layer (blueprint §8 Dashboard layer
 - [ ] Include approved but unallocated expenses in business totals and surface their unallocated status; do not silently omit them from reporting.
 - [ ] Market rankings and Opportunity Engine output surfaced here (Capability 7).
 - [ ] `GET /api/v1/dashboards/exec` per blueprint §9.6.
+- [ ] Show the refresh watermark/status and provide authorized drill-through from every displayed KPI to its refresh run and approved source records; never combine values from different refresh runs without an explicit partial-data warning.
 
 ## Feature 8.4 — Charting
 - [ ] Feature complete
-- [ ] Embed Chart.js (or Plotly) via CDN `<script>` tag directly in Jinja2 templates — no npm/webpack build step.
+- [ ] Serve a version-pinned Chart.js or Plotly static asset locally in production; a CDN is permitted only for local prototyping. Apply the production content-security policy to chart assets and data endpoints.
 - [ ] Chart data served as small JSON fragments from dedicated endpoints, refreshed via HTMX polling or on-demand refresh button.
+- [ ] Test successful, failed, and partial upstream refreshes; prove a failed refresh cannot publish mixed-state KPIs, each displayed total traces to one refresh run and approved sources, and `Test Record = Yes` rows never appear.
