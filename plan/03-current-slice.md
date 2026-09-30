@@ -159,7 +159,9 @@ Do not choose these rules by inference. Ask the business owner and update the go
 
 ## After This Slice
 
-Next unchecked step: remediation R2 (correction audit trail, D-45 approved), then R1 and R3. S10 thin ingredient-purchase, ordinary-expense, capital-asset, and minimal ingredient/recipe records follow R1–R3. Real Tesseract/OpenCV integration, database-backed job state, PDF page rendering, and production malware scanning remain explicit follow-up work; real-data OCR remains blocked until the readiness approvals are complete.
+Next unchecked step: remediation R2 (correction audit trail, D-45 approved), then R1 and R3.
+
+Review gate (D-00, approved 2026-09-30): after each slice or remediation item passes validation, critically review all code, tests, and migrations it touched, fix every finding, re-run validation, and record findings and fixes in its evidence before moving on. Stop and ask when a finding has no clear answer. S10 thin ingredient-purchase, ordinary-expense, capital-asset, and minimal ingredient/recipe records follow R1–R3. Real Tesseract/OpenCV integration, database-backed job state, PDF page rendering, and production malware scanning remain explicit follow-up work; real-data OCR remains blocked until the readiness approvals are complete.
 
 Queued after S10: side-by-side receipt review page with package count × pack size × pack unit capture and the minimal unit/alias catalog (Capabilities 2.5 and 2.6; RM-021). Cross-dimension conversions remain MVP 3 (Capability 4.9; CO-001). Item and recipe imagery (S17; IM-001, IM-002) depends on that review page and on the S14–S16 store/item identity work, because a confirmed candidate image attaches to a store item and its canonical item.
 

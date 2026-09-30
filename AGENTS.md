@@ -16,3 +16,9 @@ These instructions apply to any coding agent working in this repository, regardl
 - Use synthetic data, mocks, and provider sandboxes. Never commit secrets, tokens, customer data, production exports, or local environment files.
 - Keep public behavior and established architecture stable unless the active plan step requires a change.
 
+## Review Gate (D-00)
+
+- After a slice passes validation, critically review all code, tests, and migrations it touched before marking it complete or moving on: real entry-point wiring, tests that prove their claims, security, plan/code/migration consistency (including PostgreSQL), dead or duplicate code, and concurrency/idempotency.
+- Fix every finding, re-run validation, and record findings and fixes in the slice evidence. Stop and ask when a finding has no clear answer.
+- Never push, rewrite git history, approve an owner decision, or promote production without explicit user approval. See D-00 in `plan/04-go-no-go.md`.
+
