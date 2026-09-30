@@ -4,7 +4,7 @@
 
 The full MBS release gate preserves all 110 source-workbook regression tests and six certification controls. The standalone Receipt MVP uses its own narrower release profile and does not claim full-system certification.
 
-`plan/test-case-manifest.csv` is the traceability source for acceptance criteria and workbook cases. It currently contains 146 rows: 137 `PLANNED` and 9 `VERIFIED`; planned rows with proposed test IDs or missing commands do not count as coverage. Do not count a case as covered until its source location, application fixture and expected result, test type, existing automated test ID, runnable command, and artifact-specific validation evidence are verified; structural checks do not replace behavioral assertions.
+`plan/test-case-manifest.csv` is the traceability source for acceptance criteria and workbook cases. It currently contains 153 rows: 147 `PLANNED` and 6 `VERIFIED`; planned rows with proposed test IDs or missing commands do not count as coverage. Do not count a case as covered until its source location, application fixture and expected result, test type, existing automated test ID, runnable command, and artifact-specific validation evidence are verified; structural checks do not replace behavioral assertions.
 
 MVP 2-8 implementation order and slice contracts are defined in [mvp-slice-specifications.md](../mvp-slice-specifications.md). This file defines release profiles; it does not authorize an agent to skip the bounded-slice workflow in `03-current-slice.md`.
 
