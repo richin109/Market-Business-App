@@ -12,6 +12,8 @@ Bounded context: `mbs/products/` (blueprint §3.1 #1, Modules 1–4). Product ca
 - [ ] Store Target Stock Quantity (the intended replenishment/order quantity) and optional Product URL per Variation ID; use the product's inventory unit. When entering a purchase, offer its quantity as the suggested target and let the user confirm/change it.
 - [ ] For MVP 3, capture an opening counted quantity/date/unit for each stocked product and dated restock/manual-adjustment movements so MVP 4 has recorded product stock rather than assuming zero.
 - [ ] Product status derivation: READY / SETUP REQUIRED / CONFIGURE PRODUCT based on recipe completeness + cost presence.
+- [ ] Store approved customer-facing product name, sale unit, display price, active/inactive status, and optional customer description separately from internal cost and margin fields. Do not expose internal costs in the market-day price list.
+- [ ] Store reviewed allergen, ingredient, storage, best-by, batch/production-date, and preparation information when applicable; keep applicability and review status auditable and do not infer regulatory claims from OCR merchandise categories.
 - [ ] `GET/POST /api/v1/products`, `GET/PUT /api/v1/products/{variation_id}` per blueprint §9.1.
 - [ ] Handle products missing from Square catalog gracefully (flagged, not silently dropped).
 
@@ -23,7 +25,6 @@ Bounded context: `mbs/products/` (blueprint §3.1 #1, Modules 1–4). Product ca
 - [ ] Carry the fractional remainder across batches and week boundaries; production corrections reverse/recalculate the corresponding remainder idempotently. Unconfirmed prep plans do not accrue or post waste.
 - [ ] Recipe completeness rule: at least one ingredient row with valid Quantity Per Item and matching Unit.
 - [ ] Recipe-derived shopping quantities must preserve the ingredient's base unit and `is_perishable` value.
-- [ ] `GET/POST /api/v1/recipes`, `POST/PUT/DELETE /api/v1/recipes/{recipe_id}/ingredients...` per blueprint §9.2.
 - [ ] `GET/POST /api/v1/recipes`, ingredient and `tblRecipeSupplies` CRUD endpoints, and validated waste-percentage updates per blueprint §9.2. Use `Decimal` for recipe quantities and costs; reject incompatible units unless a defined conversion exists.
 
 ## Feature 4.3 — Ingredient Cost History

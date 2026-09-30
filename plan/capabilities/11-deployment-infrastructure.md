@@ -18,12 +18,12 @@
 - [ ] Install Docker Engine + Docker Compose plugin on the VM (same `docker-compose.yml` used in dev, with production env values).
 - [ ] Add a reverse proxy (Caddy recommended for automatic HTTPS with minimal config, or Nginx if you already run Nginx elsewhere): Caddy docs https://caddyserver.com/docs/ — terminates TLS and proxies to the FastAPI `web` service.
 - [ ] 🧑‍💻 If exposing outside the LAN, either configure port-forwarding + a DNS record you control, or use a tunnel service (e.g., Cloudflare Tunnel) instead of opening inbound ports directly: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
-- [ ] Set and document explicit production RPO/RTO targets before go-live; schedule encrypted database and receipt-file backups to meet them and test restore duration against the targets. Receipt images are business data and are not covered by a database-only backup.
+- [ ] Production recovery targets are RPO <= 24 hours and RTO <= 8 hours. Schedule encrypted database and receipt-file backups at least nightly, and run a timed restore test proving both targets; receipt images are business data and are not covered by a database-only backup.
 - [ ] Secrets (DB credentials, JWT secret, Google/Square/Meta WhatsApp credentials) stored in an `.env` file with restricted file permissions on the VM, or a secrets manager if one is already in use; never committed to source control.
 
 ## Feature 11.3 — CI/CD Pipeline
 - [ ] Feature complete
-- [ ] GitHub Actions: Lint (`ruff`, `mypy`) → Test (110 preserved source regression cases plus the application integration suite, Capability 10) → Build (single Docker image containing the FastAPI+Jinja2 app) → Deploy.
+- [ ] GitHub Actions: Lint (`ruff`, `mypy`) → run the MVP-specific test profile required by Capability 10 → Build a versioned Docker image → Deploy only after that MVP's release gate passes. MVP 7 includes all 110 source regression cases; MVP 8 runs the full MBS suite.
 - [ ] Deploy stage: back up database and file store, pull the versioned image, run exactly one Alembic migration job, deploy web/worker services only after migration success, then run health and workflow smoke tests. Do not run migrations independently in every web/worker startup.
 - [ ] Define rollback by migration compatibility: roll application images back only when the schema remains compatible; otherwise restore database and file backups under the RPO/RTO procedure. Document failed-migration and failed-smoke-test recovery.
 - [ ] 🧑‍💻 Add repository secrets in GitHub for deploy SSH key/host and any registry credentials: repo Settings → Secrets and variables → Actions.

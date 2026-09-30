@@ -18,7 +18,9 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 
 ## Feature 1.2 — Upload & Async Processing
 - [ ] Feature complete
-- [ ] `POST /api/v1/receipts/upload` accepts image(s) or PDF, validates file type/size, stores to upload staging area, enqueues a Celery task (role: MANAGER+).
+- [ ] `POST /api/v1/receipts/upload` accepts image(s) or PDF, validates file type/size, stores to upload staging area, and creates the upload/outbox records (role: MANAGER+); a retrying publisher enqueues committed work to Celery.
+- [ ] Persist each staged file's upload row and an outbox/task event in one database transaction; a retrying dispatcher publishes committed jobs to Redis/Celery. Workers claim jobs with a lease/lock and idempotency key so a broker outage or worker crash cannot lose work or process one upload concurrently.
+- [ ] Promote staged files to their immutable protected-store keys only after the upload record commits; clean abandoned staging files through an audited age-based janitor without deleting files referenced by live database rows.
 - [ ] Enforce configurable maximum file bytes, PDF page count, image dimensions, upload rate, and allowed media types; verify file signatures (not only extensions), reject malformed/encrypted files, and scan uploads before processing.
 - [ ] Compute a source-file SHA-256 and check it against `tbl_receipt_uploads` before enqueuing OCR. Reject/return the existing upload for an exact duplicate and do not call Google again; enforce a database unique constraint to handle concurrent duplicate requests.
 - [ ] Compute a local perceptual fingerprint for each image/PDF page before OCR. If it closely matches a stored source, mark the upload `POSSIBLE_DUPLICATE`, block the Google call, and require a manager to confirm “already imported” or “process as a new receipt”; never silently override a possible duplicate.

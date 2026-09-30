@@ -28,6 +28,7 @@ Bounded context: `mbs/messaging/`. Send an explicitly reviewed WhatsApp message 
 - [ ] Support plain text and approved template messages initially; validate E.164 addressing, text/template constraints, recipient consent, and service-window/template requirements before submission.
 - [ ] Validate every recipient independently, prevent duplicate phone numbers in one batch, and show blocked/ineligible recipients before confirmation; do not silently send only part of the user's selection.
 - [ ] Submit each message server-side through Meta's Cloud API `/{PHONE_NUMBER_ID}/messages`; never expose access tokens to the browser. Use per-recipient idempotency keys and persist provider message IDs and results under a parent send-batch record.
+- [ ] Persist a `SUBMITTING` attempt before calling Meta. If the response is lost or ambiguous, reconcile by webhook/provider status and do not blindly resend; document that exactly-once delivery cannot be guaranteed across the external API boundary.
 - [ ] Show current pricing basis and estimated batch cost when available; require an admin-configured spend/usage limit or confirmation threshold before sending beyond it. Do not label automated API sends free or hard-code rates.
 - [ ] Provide `POST /api/v1/whatsapp/message-batches` (minimum two recipients), `GET /api/v1/whatsapp/message-batches/{id}`, and recipient/template lookup endpoints with role checks and request validation.
 
