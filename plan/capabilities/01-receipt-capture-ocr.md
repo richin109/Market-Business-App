@@ -19,6 +19,7 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 
 ## Feature 1.2 — Upload & Async Processing
 - [ ] Feature complete
+- [ ] Define receipt PostgreSQL tables with SQLAlchemy 2 models and create or alter them only through reviewed, version-controlled Alembic migrations; do not apply manual DDL or use `Base.metadata.create_all()` to manage the schema. Test migrations against a fresh database and the prior schema.
 - [ ] `POST /api/v1/receipts/upload` accepts image(s) or PDF, validates file type/size, stores to upload staging area, and creates the upload/outbox records (role: MANAGER+); a retrying publisher enqueues committed work to Celery.
 - [ ] Persist each staged file's upload row and an outbox/task event in one database transaction; a retrying dispatcher publishes committed jobs to Redis/Celery. Workers claim jobs with a lease/lock and idempotency key so a broker outage or worker crash cannot lose work or process one upload concurrently.
 - [ ] Promote staged files to their immutable protected-store keys only after the upload record commits; clean abandoned staging files through an audited age-based janitor without deleting files referenced by live database rows.
@@ -39,15 +40,15 @@ Keep the provider-neutral `OCREngine` interface. **Tesseract + OpenCV** may be r
 ## Feature 1.4 — OCR Data Field Extraction
 - [ ] Feature complete
 - [ ] Preserve the provider's raw Date and Time values in the OCR payload, then normalize the canonical receipt date to ISO 8601 `YYYY-MM-DD` and the canonical receipt time to `HH:MM:SS`. Ambiguous, incomplete, or invalid source values require manual review and cannot be posted as business dates.
-- [ ] Extract required header fields: Store, Date, Time, TC#/Receipt#, Total.
-- [ ] Extract optional header fields: Subtotal, Tax, Payment Method.
-- [ ] Extract line items: Item Description (required), Line Total (required), UPC, Qty, Weight (lb), Unit Price (all optional per source formatting).
-- [ ] Validate extracted totals against sum of line totals; flag mismatches for manual review rather than silently accepting bad data.
+- [x] Extract required header fields: Store, Date, Time, TC#/Receipt#, Total.
+- [x] Extract optional header fields: Subtotal, Tax, Payment Method.
+- [x] Extract line items: Item Description (required), Line Total (required), UPC, Qty, Weight (lb), Unit Price (all optional per source formatting).
+- [x] Validate extracted totals against sum of line totals; flag mismatches for manual review rather than silently accepting bad data.
 
 ## Feature 1.5 — Category Classification
 - [ ] Feature complete
-- [ ] Implement keyword-based classifier covering all categories from blueprint §6.5: Beverages, Produce, Household, Frozen Meals, Lawn & Garden, Dairy, Meat, Bakery, Snacks, Personal Care, Other.
-- [ ] Keep merchandise Category classification separate from receipt business disposition (Personal / Non-business, Ordinary Business Purchase, Recipe Ingredient, Capital Asset / Equipment), which is selected and remembered in Capability 2.
+- [x] Implement keyword-based classifier covering all categories from blueprint §6.5: Beverages, Produce, Household, Frozen Meals, Lawn & Garden, Dairy, Meat, Bakery, Snacks, Personal Care, Other.
+- [x] Keep merchandise Category classification separate from receipt business disposition (Personal / Non-business, Ordinary Business Purchase, Recipe Ingredient, Capital Asset / Equipment), which is selected and remembered in Capability 2.
 - [ ] Keep classification rules in a configurable/editable rules table (not hardcoded) so keywords can be tuned without a deploy.
 - [ ] Optional stretch: allow a small local model/rules-engine upgrade path later without changing the classifier's public interface.
 

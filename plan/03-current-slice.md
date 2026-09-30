@@ -1,16 +1,19 @@
 # Current Implementation Slice
 
-Status: **queued; application code has not started**.
+Status: **in progress — receipt domain slice implemented through in-memory review/retrieval; database/API/Docker validation remains pending (U-1 in [04-go-no-go.md](04-go-no-go.md))**.
 
-## Active Task — MVP 1 Local Development Foundation
+Evidence recorded 2026-09-30 (host, Python 3.12.10, uv-managed environment from `uv.lock`): `pytest` 24 passed; `ruff check src tests` passed; `mypy src tests` (strict) passed; HTTP `GET /health` returned `{"status":"ok"}` from uvicorn. Receipt tests cover normalization, raw OCR snapshots and metadata, upload validation, exact and canonical-ID deduplication, in-memory retrieval, immutable review dispositions, and remembered-rule matching. Not run: `docker compose` commands below (Docker not installed).
 
-Establish a runnable local Python application and repeatable development/test loop. This is local foundation work only; it is permitted under the conditional-go status in [the implementation-readiness gate](02-implementation-readiness.md).
+## Active Task — MVP 1 Receipt Normalization Slice
+
+Establish the first receipt-only domain slice with synthetic data and a mocked OCR boundary. This remains local development work and is permitted under the conditional-go status in [the implementation-readiness gate](02-implementation-readiness.md).
 
 **Scope**
-- Declare the Python 3.12 runtime and planned dependencies in `pyproject.toml`, including FastAPI, pytest, Ruff, and mypy; add a reproducible dependency lock file.
-- Create the minimal `src/mbs/` application with a health endpoint and one focused test.
-- Add the MVP 1 local Docker Compose services from Capability 11.1: web, PostgreSQL, Redis, Celery worker, and Celery beat. Keep credentials as safe placeholders; no provider credentials are needed for this slice.
-- Add documented commands for starting/stopping/logging, migrations, tests, lint, and type checking only after their implementations exist.
+- Define a provider-neutral `OCREngine` boundary for mocked and future Document AI implementations.
+- Normalize mocked OCR headers and line items into immutable typed receipt data, preserving raw date/time values and OCR metadata.
+- Build the composite `Receipt_ID` from store, full ISO date, canonical time, and transaction number, with exact and canonical-ID duplicate guards.
+- Validate synthetic upload signatures and source hashes, then save accepted receipts to an injectable in-memory repository.
+- Classify merchandise independently from business dispositions; support immutable review updates and remembered-rule matching.
 
 **Dependencies**
 - The Python stack and local services are confirmed in [the implementation overview](00-overview.md) and [Capability 11](capabilities/11-deployment-infrastructure.md).
@@ -18,22 +21,24 @@ Establish a runnable local Python application and repeatable development/test lo
 - No Square, Meta, or Google credentials, real receipts, or production infrastructure are required.
 
 **Out of scope**
-- Receipt upload/OCR, authentication workflows, business schemas/migrations, live provider calls, real data, and production deployment.
+- Google Document AI calls, PostgreSQL/Alembic persistence, HTTP upload/read APIs, authentication workflows, Celery orchestration, protected file storage, live provider calls, real data, and production deployment.
 - Any decision about market-specific timezone behavior, MVP 2 price/session allocation, or settlement state transitions.
 
 **Acceptance evidence**
-- A fresh local environment can build and start the services using the documented commands.
-- The health endpoint returns a successful response.
-- The focused health test, Ruff, and mypy complete successfully in the project environment.
-- The image contains no real credentials and no live provider is called.
+- Synthetic mocked OCR normalizes to typed receipt header and item data.
+- Raw source date/time values are retained while canonical ISO values are validated.
+- Receipt identity is stable and Decimal totals are used; mismatched line totals are flagged.
+- Focused receipt tests, the full test suite, Ruff, and mypy complete successfully.
+- No real receipt files or live providers are used.
+- The 24-test suite, Ruff, and mypy pass; Docker remains unavailable on the host.
 
-**Validation commands to establish in this slice**
-- `docker compose config`
-- `docker compose up --build -d`
-- `docker compose exec web pytest`
-- `docker compose exec web ruff check src tests`
-- `docker compose exec web mypy src`
-- An HTTP smoke check against the documented health endpoint.
+**Validation commands used for this slice**
+- `uv run --frozen pytest tests/test_receipt_ocr.py -q`
+- `uv run --frozen pytest`
+- `uv run --frozen ruff check src tests`
+- `uv run --frozen mypy src tests`
+
+The foundation's Docker validation remains pending: `docker compose config` cannot run because Docker is not installed on this host.
 
 These are target commands for the slice, not commands already verified in this repository. Record any necessary command adjustment in the README and Copilot instructions when the scaffold is implemented.
 
@@ -51,4 +56,4 @@ Do not choose these rules by inference. Ask the business owner and update the go
 
 ## After This Slice
 
-Next: implement the first receipt-only vertical slice selected from Capabilities 1 and 2, using mocked OCR and synthetic receipt files. Select its precise feature steps and focused validation after the local foundation is verified. Real OCR remains blocked until the readiness approvals are complete.
+Next: implement the database-backed receipt upload/read boundary with reviewed SQLAlchemy models, Alembic migrations, and focused API tests. Real OCR remains blocked until the readiness approvals are complete.

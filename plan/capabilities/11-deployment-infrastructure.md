@@ -11,6 +11,7 @@
 - [ ] Generate and commit a version-pinned Tailwind CSS static asset with the standalone CLI; serve it locally from the web/reverse-proxy layer in production. The production content-security policy must not require Tailwind CDN access.
 - [ ] 🧑‍💻 Install Docker Desktop (or Docker Engine + Compose) on this laptop if not already installed: https://docs.docker.com/get-docker/
 - [ ] `make`/script targets (or a simple `run.sh`) for `up`, `down`, `logs`, `migrate`, `test` to keep local workflow one-command simple.
+- [ ] The local `migrate` target applies version-controlled Alembic revisions; schema changes made during development are captured in a new revision rather than left as manual database edits. The test target applies migrations when preparing its database.
 
 ## Feature 11.2 — Production Target: Proxmox VM
 - [ ] Feature complete

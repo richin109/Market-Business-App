@@ -36,11 +36,12 @@ Covers storage and lifecycle of receipts once captured by Capability 1 — listi
 - [ ] Receipt detail page: header summary + line items table, category badges.
 - [ ] Upload page: drag-and-drop file input, HTMX polling against the Celery task status endpoint from Capability 1, live "existing / new / duplicates / added" result summary.
 - [ ] Role-gated delete action (ADMIN only) with confirmation prompt.
+- [ ] Use semantic HTML and accessible labels/roles for interactive controls; add Python Playwright end-to-end tests for the receipt upload, processing-status, review/correction, and role-gated delete workflows using synthetic files and mocked OCR.
 
 ## Feature 2.5 — OCR Review & Transaction Routing
 - [ ] Feature complete
-- [ ] OCR creates reviewable draft receipt/header/item data; it must not silently post uncertain or mismatched values into purchases, expenses, or ingredient costs.
-- [ ] For every receipt line, let the reviewer choose one business disposition: Personal / Non-business; Ordinary Business Purchase; Recipe Ingredient; or Capital Asset / Equipment (CapEx). Keep this separate from the merchandise Category (Produce, Dairy, etc.); use both consistently in OCR review and manual receipt entry.
+- [x] OCR creates reviewable draft receipt/header/item data; it must not silently post uncertain or mismatched values into purchases, expenses, or ingredient costs.
+- [x] For every receipt line, let the reviewer choose one business disposition: Personal / Non-business; Ordinary Business Purchase; Recipe Ingredient; or Capital Asset / Equipment (CapEx). Keep this separate from the merchandise Category (Produce, Dairy, etc.); use both consistently in OCR review and manual receipt entry.
 - [ ] For Ordinary Business Purchase lines, allow an additional reviewed choice between a stocked operating supply (for example, cups) and a direct expense; stocked supplies require quantity/unit and use Capability 4.8 inventory records.
 - [ ] Recipe Ingredient classification must link the item to one or more existing recipes and its ingredient record; allow recipe search/multi-select and creation of a missing ingredient or recipe without losing the receipt review.
 - [ ] Route Ordinary Business Purchase lines to either a stocked-supply record or a direct expense, never both; route Recipe Ingredient lines to ingredient purchase/cost records, Capital Asset / Equipment lines to asset tracking, and Personal / Non-business lines to no business ledger. Preserve receipt-to-record links and approval audit.
@@ -51,6 +52,6 @@ Covers storage and lifecycle of receipts once captured by Capability 1 — listi
 ## Feature 2.6 — Remembered Item Classifications
 - [ ] Feature complete
 - [ ] Persist reviewer decisions in a reusable item-rule table, including normalized item signature, vendor, UPC when available, classification, ingredient, linked recipe IDs, asset category when applicable, last confirmation, and audit fields.
-- [ ] Match future receipt lines first by vendor + UPC; when UPC is absent, use normalized vendor + item description. Reuse a previously confirmed exact match as the default without making the user re-enter its classification or recipe links.
+- [x] Match future receipt lines first by vendor + UPC; when UPC is absent, use normalized vendor + item description. Reuse a previously confirmed exact match as the default without making the user re-enter its classification or recipe links.
 - [ ] Allow the reviewer to change the suggested classification or recipe links for an individual line; ask whether the change should update the saved rule. Do not auto-apply ambiguous description-only matches; show them as suggestions for confirmation.
 - [ ] Keep Personal / Non-business decisions out of business purchases, expenses, ingredient costs, and capital assets; provide a way to review and correct remembered rules.

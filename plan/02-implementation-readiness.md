@@ -34,3 +34,65 @@ The owner must approve values before MVP 1 production promotion. Measure them in
 ## MVP 2 Market-Day Measures
 
 Before MVP 2 production, approve and test values for online sale acknowledgement, Square synchronization delay, queued-sale state visibility, outage recovery, browser/device recovery, and tender-closeout discrepancy handling. The documented decision must also state whether offline sale queueing is supported; if not, the UI must prevent offline sale submission and make that limitation explicit.
+
+## MVP 3 Costing & Opening-Balance Measures
+
+Before MVP 3 production, approve and record the product/ingredient/supply unit catalog, conversion authority, quantity precision, and rounding policy. Define the opening-count cutoff instant and treatment of late or backdated movements. The `costing-mvp` profile must prove that MVP 1 ingredient, recipe, receipt-item, expense, and asset links migrate replay-safely without loss or duplicate posting; opening counts plus subsequent movements must reconcile to a known physical count.
+
+| Measure | Required approval value | Acceptance evidence |
+|---|---|---|
+| Unit conversion authority | Approved catalog, dimensional-compatibility rule, and mass/volume exception policy | Versioned conversion registry and validation tests |
+| Opening-count cutoff | Timestamp semantics and late-event/restatement rule | Seeded count-and-movement reconciliation |
+| Historical migration | Approved source-to-target mapping for all MVP 1 thin records | Replay, rollback, and source-lineage test results |
+
+## MVP 4 Prep & Messaging Measures
+
+Before MVP 4 production, approve the lightweight stock-balance interface used by shopping and prep until Capability 6 is available. The shared production service must be active before confirmation can post any stock effect. Production WhatsApp activation additionally requires the approved WABA, consent/privacy treatment, spend threshold, webhook verification, and a controlled opted-in-recipient smoke test.
+
+| Measure | Required approval value | Acceptance evidence |
+|---|---|---|
+| Balance authority | One read interface and movement sources for MVP 4 shopping/prep | No parallel balance calculation in integration tests |
+| Prep atomicity | Shared production-event identity and correction policy | Retry, concurrency, rollback, and correction tests |
+| Messaging activation | WABA/phone/display-name, consent, privacy, and spend approvals | Signed activation record and controlled production smoke test |
+
+## MVP 5 Market & Expense Measures
+
+Before MVP 5 production, approve the immutable market-visit identity and the expense provenance model. The `markets-mvp` profile must prove that MVP 2 dated visits migrate without duplication, route allocations reconcile exactly to each trip, and receipt/manual expense retries or corrections produce one net audited expense.
+
+| Measure | Required approval value | Acceptance evidence |
+|---|---|---|
+| Visit migration | MVP 2-to-MVP 5 identity and duplicate-rejection policy | Replay migration preserving sales, prep, and session links |
+| Route allocation | Directed-leg allocation and mileage-rate snapshot policy | Itinerary tests where allocations equal total trip cost |
+| Expense posting | Source-event uniqueness and correction/reversal policy | Concurrent/replayed source posting tests |
+
+## MVP 6 Inventory & Reorder Measures
+
+Before MVP 6 production, approve the effective-dated calendar-period policy used for weekly close, expiry, reporting, and alerts. Product, ingredient, and supply balances must each have reproducible versioned period snapshots. A late event affecting a closed period must produce a linked restatement rather than silently rewrite history.
+
+| Measure | Required approval value | Acceptance evidence |
+|---|---|---|
+| Period calendar | Effective timezone/week-start policy and close-completion rule | DST, non-default week-start, and period-boundary tests |
+| Snapshot coverage | Product, ingredient, and supply snapshot grain and valuation policy | Ledger-to-snapshot reconciliation for all stock classes |
+| Closed-period correction | Restatement, downstream rebuild, and alert re-arm rule | Late sale/refund/purchase/production correction tests |
+
+## MVP 7 Analytics Measures
+
+Before MVP 7 production, approve the ranking-score ownership and the forecast observation-completion rule. Dashboards may publish only coherent successful refresh runs with source watermarks, accepted restatement versions, and drill-through lineage. A failed or partial refresh must remain visibly stale and cannot publish mixed-state KPIs.
+
+| Measure | Required approval value | Acceptance evidence |
+|---|---|---|
+| Metric contract | Ranking score source/scale/as-of behavior and forecast observation predicate | Boundary, missing-data, and restatement-selection tests |
+| Refresh coherence | Required upstream runs, watermark lag, and stale/failed display policy | Successful, failed, and partial refresh publication tests |
+| Regression traceability | Complete source-workbook mapping and approved expected results | Passing `analytics-mvp` result with all mapped behavioral cases |
+
+## MVP 8 Tax & Full-System Measures
+
+Before MVP 8 production, define and approve a tax-year provider-coverage certificate for every expected provider/account. The certificate must include covered business-date range, source statement or final import watermark, expected order/payment/refund counts and amounts, reconciliation outcome, gap/exception IDs, and owner/preparer approval. An absent, failed, or unresolved blocking certificate prevents package generation and production promotion.
+
+The production deployment procedure must also prove write quiescence, worker drain, scheduler control, migration compatibility, in-flight workflow recovery, and failed-migration rollback. Production runs from an immutable Compose profile with pinned image digests, disabled reload/debug facilities, restricted public exposure, health checks, restart policies, and production-only secrets/configuration.
+
+| Measure | Required approval value | Acceptance evidence |
+|---|---|---|
+| Tax coverage | Provider/account population, late-arrival cutoff, and blocking-exception policy | Signed tax-year coverage certificate and reconciliation report |
+| Tax readiness | Supported-year mappings and tax-professional approval scope | Signed approval record and reproducible frozen package |
+| Deployment recovery | Quiescence, backup/restore, migration, rollback, and in-flight-job recovery procedure | Timed restore and failed-migration drill on the promoted artifact |

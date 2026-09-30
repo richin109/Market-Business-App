@@ -1,6 +1,6 @@
 # MBS MVP Delivery Roadmap
 
-This roadmap defines deployable release order. Capability numbers identify functional areas, not delivery order. Each MVP should be usable before the next begins; shared security, storage, migrations, and phase-specific tests are foundations from the first release.
+This roadmap defines deployable release order. Capability numbers identify functional areas, not delivery order. Each MVP should be usable before the next begins; shared security, storage, migrations, and phase-specific tests are foundations from the first release. Every MVP must track PostgreSQL schema changes with SQLAlchemy models and Alembic migrations, and every MVP that delivers browser UI must include its Playwright end-to-end suite in the release profile (see Capabilities 10 and 11).
 
 ## MVP 1 — Receipt Capture, Review & Storage
 
@@ -17,7 +17,7 @@ This roadmap defines deployable release order. Capability numbers identify funct
 
 **Deferred:** Full cost/accounting logic, multi-receipt business dashboards, Square data, weekly operations, inventory valuation, tax packages, and messaging.
 
-**Done when:** a manager can upload, review/correct, classify and link receipt lines, save, then retrieve all parsed data after a container restart without another OCR call; duplicate paths do not overwrite data or cause unnecessary API calls. The `receipt-mvp` profile in Capability 10 must pass before promotion.
+**Done when:** a manager can upload, review/correct, classify and link receipt lines, save, then retrieve all parsed data after a container restart without another OCR call; duplicate paths do not overwrite data or cause unnecessary API calls. The `receipt-mvp` profile in Capability 10 and the MVP 1 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 2 — Square Setup, Sales Activation & Market-Day Selling
 **Goal:** Establish the shared sales ledger and let a small business capture and close real market-day sales without duplicate or untraceable facts.
@@ -34,7 +34,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 - Keep unresolved lines in a visible import-exception queue, not the accepted sales ledger. Valid lines may be accepted while failing lines remain staged; correct prerequisites and retry idempotently.
 - Preserve source order/payment IDs and the exact cost/market mappings and COGS snapshot used for each accepted sale so later master-data changes do not silently rewrite history.
 - Capability 16 provides a market-day session, fast mobile sale capture, configured tender controls, product availability, closeout, and helper permissions over Capability 14's canonical services. Square remains the online POS unless an explicit offline-queue decision is approved; any offline queue must reconcile idempotently before a sale is treated as settled.
-- **Done when:** every accepted Square or manual sales line has a source-specific identity, date-effective cost, and market/channel assignment; a market operator can open, sell, reconcile tenders, and close a visit; unresolved lines and close exceptions remain visible; retries never duplicate accepted sales. The `sales-mvp` profile in Capability 10 must pass before promotion.
+- **Done when:** every accepted Square or manual sales line has a source-specific identity, date-effective cost, and market/channel assignment; a market operator can open, sell, reconcile tenders, and close a visit; unresolved lines and close exceptions remain visible; retries never duplicate accepted sales. The `sales-mvp` profile in Capability 10 and the MVP 2 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 
 ## MVP 3 — Products, Recipes & Costing
@@ -49,7 +49,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 - Date-specific recipe/product cost calculations, preferred source, product readiness/cost-review flags, and ingredient cost-history table/chart.
 - Reconcile/update the minimal ingredient and recipe records created in MVP 1 without losing receipt links or history.
 
-**Done when:** a product's recipe and cost can be traced to dated purchases and locations, and prior costs remain unchanged. The `costing-mvp` profile in Capability 10 must pass before promotion.
+**Done when:** a product's recipe and cost can be traced to dated purchases and locations, and prior costs remain unchanged. The `costing-mvp` profile in Capability 10 and the MVP 3 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 4 — Shopping Lists & WhatsApp
 
@@ -62,7 +62,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 - WhatsApp Cloud API: manually initiated message batches to at least two opted-in recipients, with add-more support, private individual delivery, approved templates as required, consent/opt-out checks, cost estimate, and delivery status. Manual print/export remains available.
 - Capability 15 confirms prep through Capability 5's shared production service, posting ingredient consumption, stocked-supply use, and product quantities exactly once; unconfirmed plans do not change stock. Capability 5 provides full weekly entry and correction workflows in MVP 5.
 
-**Done when:** a dated product target list produces a print-ready store-by-store ingredient list and can be sent to the selected WhatsApp recipients. Automatic stock alerts are deferred until inventory is reconciled in MVP 6. The `prep-mvp` profile in Capability 10 must pass before promotion.
+**Done when:** a dated product target list produces a print-ready store-by-store ingredient list and can be sent to the selected WhatsApp recipients. Automatic stock alerts are deferred until inventory is reconciled in MVP 6. The `prep-mvp` profile in Capability 10 and the MVP 4 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 5 — Markets & Weekly Operations
 
@@ -73,7 +73,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 - One-way route distances stored and reused; multi-market itinerary asks Home versus direct travel; calculate trip miles/cost and retain auditable allocation.
 - Capability 5 expands the Capability 15 prep production-event workflow with weekly entry and audited corrections; prep and manual production use the same ledger/service. Add samples, stocked-supply usage by market/date, and business expense entry with audit history. Capability 15 lists can be linked to actual visits; planned quantity is not production.
 
-**Done when:** market/date, route, production, and expenses are captured once and flow into later inventory and reporting. The `markets-mvp` profile in Capability 10 must pass before promotion.
+**Done when:** market/date, route, production, and expenses are captured once and flow into later inventory and reporting. The `markets-mvp` profile in Capability 10 and the MVP 5 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 6 — Inventory & Reorder
 
@@ -85,7 +85,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 - Reorder engine using units-consistent usage, lead time, safety stock, on-hand amount, preferred/last source, and estimated purchase cost.
 - Enable automatic WhatsApp utility alerts for non-perishable stocked products, recipe ingredients, and operating supplies when on-hand quantity reaches 20% or less of the confirmed target/replenishment quantity (100 ordered means alert at 20 remaining). Include last approved purchase store/location/date and Product URL when available; require a source record, opted-in recipient, approved template/window, and dedup/re-arm controls.
 
-**Done when:** weekly balances reconcile, waste/carry-forward are correct, and alerts are driven by verified quantities. The `inventory-mvp` profile in Capability 10 must pass before promotion.
+**Done when:** weekly balances reconcile, waste/carry-forward are correct, and alerts are driven by verified quantities. The `inventory-mvp` profile in Capability 10 and the MVP 6 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 7 — Dashboards, Rankings & Forecasting
 
@@ -93,7 +93,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 
 **In scope:** Operations and Executive dashboards, scorecards, rankings, opportunity scores, forecasts, test-record isolation, refresh orchestration, and source lineage.
 
-**Done when:** dashboard totals reconcile to approved source records and all 110 source-workbook regression cases pass. Tax-specific application tests and final release controls remain for MVP 8. The `analytics-mvp` profile in Capability 10 must pass before promotion.
+**Done when:** dashboard totals reconcile to approved source records and all 110 source-workbook regression cases pass. Tax-specific application tests and final release controls remain for MVP 8. The `analytics-mvp` profile in Capability 10 and the MVP 7 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
 
 ## MVP 8 — Tax Workpapers & Full-System Release
 
@@ -101,7 +101,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 
 **In scope:** Sole-proprietor Schedule C-aligned workpaper for Form 1040 use, applicable Florida business-tax schedules, source-document index, year snapshot, tax-professional review, tax-specific application tests, six workbook release controls, full-system certification using the 110 source-workbook cases plus all applicable application tests, Proxmox promotion, backup/restore and operational security review.
 
-**Done when:** full-system certification passes. The app prepares documents; it does not sign or file returns. The `full-mbs` profile and all six blocking controls in Capability 10 must pass before production promotion.
+**Done when:** full-system certification passes. The app prepares documents; it does not sign or file returns. The `full-mbs` profile, all six blocking controls in Capability 10, and the MVP 8 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before production promotion.
 
 ## Capability Mapping & Shared Foundations
 
