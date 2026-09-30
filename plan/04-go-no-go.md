@@ -32,7 +32,7 @@ Bottom line: local receipt work may continue with mocks; the Docker Compose foun
 | Artifact | Finding |
 |---|---|
 | `plan/*.md`, 16 capability files | Detailed and mostly internally consistent. Plan precedence resolves most source conflicts. |
-| `plan/test-case-manifest.csv` | Had a header only (0 rows). Now contains 110 workbook cases + 18 MVP 1 criteria + SQ-001, all `PLANNED`. It records no coverage. |
+| `plan/test-case-manifest.csv` | Contains 110 workbook cases + 20 MVP 1 criteria + SQ-001 (131 rows total): 123 `PLANNED` and 8 `VERIFIED`. Planned rows may reference future tests, but most still lack runnable commands and do not count as coverage. |
 | `Market_Business_System_v3_3_Testing_Dashboard.xlsx` (42 sheets) | Contains the fixtures and 110 regression cases. 46 are behavioral, 46 are formula-existence checks (`ISFORMULA`/`FORMULATEXT`), 14 are row-count/meta checks, 3 check configuration, and 1 is a tautology (RT041 is always 0). |
 | `Walmart_Receipt_Complete_With_AI.xlsx` | Three receipts and 32 lines. Line totals reconcile exactly to the subtotals (55.82, 29.50, 29.81). Good golden OCR fixture. |
 | Blueprint DOCX | Formulas and schemas are useful. It has stale stack choices (React, K8s, CSV import) that the plan supersedes. |
@@ -44,7 +44,7 @@ Bottom line: local receipt work may continue with mocks; the Docker Compose foun
 | # | Severity | Finding | Resolution |
 |---|---|---|---|
 | F1 | ~~Blocker~~ Resolved 2026-09-30 | Docker Desktop was not installed; the current slice needs `docker compose`. Now installed (Docker Desktop 29.8.1, Compose v5.5.1, WSL 2 + Ubuntu 26.04 LTS) and the Compose stack passes its acceptance checks. | U-1 done |
-| F2 | Blocker (vibe) | [03-current-slice.md](03-current-slice.md) defines only the foundation slice and forbids the agent from choosing the next one. The agent stops after every slice. | Approve the slice queue in §7 and the auto-advance rule (D-00) |
+| F2 | ~~Blocker (vibe)~~ Resolved 2026-09-30 | [mvp-slice-specifications.md](mvp-slice-specifications.md) now defines bounded MVP 2-8 slices with dependencies, acceptance assertions, traceability, validation commands, and stop conditions. The agent still stops at an unapproved decision, missing evidence, or user-only action under D-00. | Copy one approved row into [03-current-slice.md](03-current-slice.md) before implementation |
 | F3 | Blocker (MVP 7) | 61 workbook cases are structural/meta/tautological, and three additional cases are configuration checks. "All 110 pass" has no executable meaning in Python yet. | D-23 translation rules and executable manifest evidence |
 | F4 | High | Workbook fixtures conflict with each other. RT043 values TEST-VAR002 at cost 3.80, but RT056 requires VAR002 to have no cost. The `Sales_Data` Square Fee fixture is 4.50, but the formula gives 150 × 0.026 + 0.10 = 4.00. | D-26 |
 | F5 | High | Time-dependent cases (REVIEW COST, Market Active) use `TODAY()`, so they are non-deterministic. | D-27 fixed as-of date |
@@ -66,7 +66,7 @@ Bottom line: local receipt work may continue with mocks; the Docker Compose foun
 ### MVP 2 — Square, Sales Ledger, Market-Day POS
 - **Blocked by three owner decisions already listed in 03-current-slice.md** (timezone authority, session price/availability, sale/close state table), plus the offline-mode decision and the quantitative targets.
 - **Also undefined:** HELPER role (D-12), attendance vocabulary (D-18), and market Import Status derivation for API sync (D-19). The workbook's RT077–RT079 depend on D-19.
-- **Agent can do after approval:** all of it against a Square sandbox or recorded fixtures. Payments, Orders, and Catalog are mockable.
+- **Agent can do after approval:** execute the bounded rows 2.1-2.5 in [mvp-slice-specifications.md](mvp-slice-specifications.md) against a Square sandbox or recorded fixtures. Payments, Orders, and Catalog are mockable.
 
 ### MVP 3 — Products, Recipes, Costing
 - The readiness gate requires owner approval of the unit catalog, precision/rounding, and opening-count cutoff. The recommended defaults are D-28–D-31.
@@ -180,14 +180,9 @@ Only after D-00 is approved can the agent move to the next **fully specified, ap
 | S13 | Backup/restore scripts, restart-survival smoke, `receipt-mvp` profile run recorded in `tblTesting` | RM-010, RM-016 |
 | Future (outside MVP 1) | *(Needs U-2, U-3 and provider approvals)* Optional Document AI adapter behind a feature flag; one controlled live-provider smoke test | — |
 
-### MVP 2–8 (outlines only; create and approve bounded slices before any implementation)
-- **MVP 2:** read-only Square adapter and SQ-001 gate → Square POS/session correlation (D-16) and stock source-event contract (D-17) → Catalog staging → minimal product + effective cost → market directory, location map, dated visits, operating hours (D-01, D-18) → Orders staging with cursor → line acceptance and exceptions (D-03) → manual sales → Payments/fees reconciliation → HELPER role and market-day session → session allocation (D-02) → tender closeout → `sales-mvp`.
-- **MVP 3:** Unit registry (D-30) → full product master and status (D-28) → recipes, supplies, waste % → ingredient cost history → purchases → MVP 1 migration replay/rollback → opening counts (D-31) → `costing-mvp` plus RT051–RT064 and RT070.
-- **MVP 4:** `StockBalanceReader` (D-32) → shared production service → load lists → store-grouped shopping → WhatsApp adapter (mocked) → prep confirmation → `prep-mvp`.
-- **MVP 5:** Market cost periods → weekly visits (D-18) → route legs and allocation (D-22) → production UI and corrections → expenses → assets → `markets-mvp` plus RT071–RT082.
-- **MVP 6:** Movement ledgers → weekly snapshots (D-20, D-21, D-33) → expiry/close jobs → restatements → valuation → reorder → low-stock alerts → `inventory-mvp` plus RT026–RT050.
-- **MVP 7:** Refresh runs/watermarks → scorecards → rankings (D-24) → opportunity → forecasts → Ops/Exec dashboards → health score (D-25) → structural-case translations (D-23) → `analytics-mvp` with all 110 cases.
-- **MVP 8:** Tax profile → Schedule C-aligned draft → Florida sales-tax workpaper → close checklist → snapshots/exports → release certification controls → `full-mbs`. Production waits on U-6 and U-7.
+### MVP 2-8 bounded slices
+
+The former MVP outlines are now executable slice specifications in [mvp-slice-specifications.md](mvp-slice-specifications.md). Each MVP has named slices, prerequisites, owner decisions, acceptance assertions, manifest/test traceability, release-profile requirements, and stop conditions. Before implementation, copy exactly one approved row into `03-current-slice.md`.
 
 ## 8. Re-assessment Triggers
 
@@ -203,3 +198,4 @@ Record each change to a verdict here, with its date and the evidence behind it.
 |---|---|---|
 | 2026-09-30 | Foundation slice scaffold built; host checks pass. Build verdict stays NO-GO until the Docker acceptance commands run (U-1). Capability 16 converted to checkboxes (F9). | pytest 1 passed, ruff and mypy strict clean on Python 3.12.10; `/health` returned 200 |
 | 2026-09-30 | U-1 done: WSL 2 with Ubuntu 26.04 LTS and Docker Desktop installed. Foundation slice Build verdict NO-GO → **GO**; F1 resolved. | WSL 3.0.1.0, `wsl -l -v` → `* Ubuntu-26.04` v2; Docker Desktop 29.8.1 (Linux engine), Compose v5.5.1; `hello-world` ran; `docker compose config --quiet` OK; `docker compose up --build -d` started web, postgres (healthy), redis (healthy), celery-worker, celery-beat; `/health` → `{"status":"ok"}`; in-container pytest 24 passed, ruff and mypy clean |
+| 2026-09-30 | MVP 2-8 vibe-readiness contract added; F2 resolved. | `plan/mvp-slice-specifications.md` defines 23 bounded rows across MVP 2-8 with prerequisites, owner gates, focused acceptance, release profiles, and stop conditions. |

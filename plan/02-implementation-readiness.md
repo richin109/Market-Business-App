@@ -9,7 +9,7 @@ Status: **conditional go for local MVP 1 foundations only**. Do not ingest real 
 - [ ] Classify `support/WDS_v2_1_Reconstruction_Grade_Specification 1.docx` and `support/Devin_MBS_v3_3_Prompt.docx` / `.txt` as reference-only or superseded, and record the approving owner and rationale; they are not independent authority for implementation choices.
 - [ ] Resolve conflicting requirements before implementation. Precedence is: approved signed readiness decision, then `00-overview.md`, then `01-mvp-roadmap.md`, then capability files, then source documents/workbooks. A lower-precedence source must not silently override a higher-precedence requirement.
 - [ ] Log a requirement change with its rationale, approving owner, affected capability, migration impact, and regression-test impact before implementing it.
-- [ ] Complete `plan/test-case-manifest.csv`, mapping every MVP 1 acceptance criterion and each of the 110 source-workbook cases to source artifact/tab/cell or scenario, concrete application fixture and expected result, structural/behavioral test type, implemented automated test ID, runnable validation command, and release profile. Its current 129 PLANNED rows (including SQ-001; only that row has a proposed command, and none of the referenced tests is implemented) do not satisfy this gate; translate structural cases into executable application equivalents before certification.
+- [ ] Complete `plan/test-case-manifest.csv`, mapping every MVP 1 acceptance criterion and each of the 110 source-workbook cases to source artifact/tab/cell or scenario, concrete application fixture and expected result, structural/behavioral test type, implemented automated test ID, runnable validation command, and release profile. It currently contains 133 rows: 124 `PLANNED` and 9 `VERIFIED`; 119 rows still lack validation commands. Planned rows may retain proposed future test IDs, but they do not count as coverage until the referenced file, command, and result exist. This does not satisfy the gate. Translate structural cases into executable application equivalents and update evidence from the actual repository before certification.
 
 ## Real-Data Privacy & Provider Approval
 
@@ -40,11 +40,11 @@ Before MVP 2 production, approve and test values for online sale acknowledgement
 
 ## MVP 3 Costing & Opening-Balance Measures
 
-Before MVP 3 production, approve and record the product/ingredient/supply unit catalog, conversion authority, quantity precision, and rounding policy. Define the opening-count cutoff instant and treatment of late or backdated movements. The `costing-mvp` profile must prove that MVP 1 ingredient, recipe, receipt-item, expense, and asset links migrate replay-safely without loss or duplicate posting; opening counts plus subsequent movements must reconcile to a known physical count.
+Before MVP 3 production, approve and record the product/ingredient/supply unit catalog, conversion authority, quantity precision, and rounding policy. Global conversions apply only within one dimension (count, mass, or volume). Any count/mass/volume crossing, including produce sold by container such as a pint of strawberries, requires an owner-entered, effective-dated per-item conversion marked as an estimate (Capability 4.9, CO-001). Define the opening-count cutoff instant and treatment of late or backdated movements. The `costing-mvp` profile must prove that MVP 1 ingredient, recipe, receipt-item, expense, and asset links migrate replay-safely without loss or duplicate posting; opening counts plus subsequent movements must reconcile to a known physical count.
 
 | Measure | Required approval value | Acceptance evidence |
 |---|---|---|
-| Unit conversion authority | Approved catalog, dimensional-compatibility rule, and mass/volume exception policy | Versioned conversion registry and validation tests |
+| Unit conversion authority | Approved catalog and receipt aliases, same-dimension-only global rule, and per-item cross-dimension conversion policy | Versioned conversion registry, per-item conversion history, and CO-001 validation tests |
 | Opening-count cutoff | Timestamp semantics and late-event/restatement rule | Seeded count-and-movement reconciliation |
 | Historical migration | Approved source-to-target mapping for all MVP 1 thin records | Replay, rollback, and source-lineage test results |
 

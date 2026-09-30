@@ -6,11 +6,25 @@ from enum import StrEnum
 from threading import Lock
 from typing import Protocol
 
+from mbs.receipts.duplicates import (
+    InMemoryPerceptualDuplicateStore,
+    PendingDuplicate,
+    PerceptualDuplicateStore,
+    PerceptualHasher,
+)
 from mbs.receipts.ocr import ExtractedReceipt, OCREngine, normalize_receipt
 from mbs.receipts.repository import InMemoryReceiptRepository
+from mbs.receipts.storage import (
+    MalwareScanner,
+    Outbox,
+    OutboxEvent,
+    ProtectedFileStore,
+    ScanStatus,
+)
 
 ALLOWED_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "application/pdf"})
 DEFAULT_MAX_FILE_BYTES = 10_000_000
+DEFAULT_PHASH_THRESHOLD = 6
 FILE_SIGNATURES = {
     "image/jpeg": (b"\xff\xd8\xff",),
     "image/png": (b"\x89PNG\r\n\x1a\n",),
@@ -22,12 +36,17 @@ class UploadStatus(StrEnum):
     ACCEPTED = "ACCEPTED"
     EXACT_DUPLICATE = "EXACT_DUPLICATE"
     RECEIPT_ID_DUPLICATE = "RECEIPT_ID_DUPLICATE"
+    SCAN_PENDING = "SCAN_PENDING"
+    MALWARE_REJECTED = "MALWARE_REJECTED"
+    POSSIBLE_DUPLICATE = "POSSIBLE_DUPLICATE"
 
 
 @dataclass(frozen=True)
 class UploadResult:
     source_sha256: str
     status: UploadStatus
+    file_key: str | None = None
+    matched_source_sha256: str | None = None
     receipt: ExtractedReceipt | None = None
 
 
@@ -85,12 +104,24 @@ class ReceiptUploadService:
         source_hash_store: SourceHashStore | None = None,
         receipt_id_store: ReceiptIdStore | None = None,
         receipt_repository: ReceiptRepository | None = None,
+        file_store: ProtectedFileStore | None = None,
+        malware_scanner: MalwareScanner | None = None,
+        outbox: Outbox | None = None,
+        perceptual_hasher: PerceptualHasher | None = None,
+        perceptual_store: PerceptualDuplicateStore | None = None,
+        perceptual_threshold: int = DEFAULT_PHASH_THRESHOLD,
     ) -> None:
         self._ocr_engine = ocr_engine
         self._max_file_bytes = max_file_bytes
         self._source_hash_store = source_hash_store or InMemorySourceHashStore()
         self._receipt_id_store = receipt_id_store or InMemoryReceiptIdStore()
         self._receipt_repository = receipt_repository or InMemoryReceiptRepository()
+        self._file_store = file_store
+        self._malware_scanner = malware_scanner
+        self._outbox = outbox
+        self._perceptual_hasher = perceptual_hasher
+        self._perceptual_store = perceptual_store or InMemoryPerceptualDuplicateStore()
+        self._perceptual_threshold = perceptual_threshold
 
     def upload(self, source: bytes, media_type: str) -> UploadResult:
         self._validate_source(source, media_type)
@@ -100,6 +131,69 @@ class ReceiptUploadService:
                 source_sha256=source_sha256,
                 status=UploadStatus.EXACT_DUPLICATE,
             )
+
+        if self._malware_scanner is not None:
+            scan_status = self._malware_scanner.scan(source)
+            if scan_status is ScanStatus.UNAVAILABLE:
+                self._source_hash_store.release(source_sha256)
+                return UploadResult(source_sha256, UploadStatus.SCAN_PENDING)
+            if scan_status is ScanStatus.INFECTED:
+                return UploadResult(source_sha256, UploadStatus.MALWARE_REJECTED)
+
+        fingerprint: str | None = None
+        if self._perceptual_hasher is not None:
+            fingerprint = self._perceptual_hasher.fingerprint(source, media_type)
+            matched_source = self._perceptual_store.find_near(
+                fingerprint, self._perceptual_threshold
+            )
+            if matched_source is not None:
+                self._perceptual_store.hold(
+                    source_sha256,
+                    PendingDuplicate(source, media_type, fingerprint),
+                )
+                return UploadResult(
+                    source_sha256,
+                    UploadStatus.POSSIBLE_DUPLICATE,
+                    matched_source_sha256=matched_source,
+                )
+
+        return self._accept(
+            source,
+            media_type,
+            source_sha256,
+            fingerprint,
+        )
+
+    def resolve_possible_duplicate(
+        self, source_sha256: str, process_as_new: bool
+    ) -> UploadResult:
+        pending = self._perceptual_store.take_pending(source_sha256)
+        if pending is None:
+            raise ValueError("No pending possible duplicate exists")
+        if not process_as_new:
+            self._source_hash_store.release(source_sha256)
+            return UploadResult(source_sha256, UploadStatus.EXACT_DUPLICATE)
+        return self._accept(
+            pending.source,
+            pending.media_type,
+            source_sha256,
+            pending.fingerprint,
+        )
+
+    def _accept(
+        self,
+        source: bytes,
+        media_type: str,
+        source_sha256: str,
+        fingerprint: str | None,
+    ) -> UploadResult:
+        file_key: str | None = None
+        if self._file_store is not None:
+            file_key = self._file_store.save(source_sha256, source, media_type)
+            if self._outbox is not None:
+                self._outbox.publish(
+                    OutboxEvent("RECEIPT_UPLOAD_ACCEPTED", source_sha256, file_key)
+                )
 
         try:
             receipt = self._extract_receipt(source, media_type)
@@ -111,12 +205,16 @@ class ReceiptUploadService:
             return UploadResult(
                 source_sha256=source_sha256,
                 status=UploadStatus.RECEIPT_ID_DUPLICATE,
+                file_key=file_key,
             )
 
+        if fingerprint is not None:
+            self._perceptual_store.save(source_sha256, fingerprint)
         self._receipt_repository.save(receipt)
         return UploadResult(
             source_sha256=source_sha256,
             status=UploadStatus.ACCEPTED,
+            file_key=file_key,
             receipt=receipt,
         )
 

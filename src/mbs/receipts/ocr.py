@@ -7,6 +7,8 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Protocol
 
+from mbs.receipts.category_rules import CategoryRuleSpec, classify_description
+
 
 class OCREngine(Protocol):
     def extract(self, source: bytes, media_type: str) -> dict[str, Any]: ...
@@ -59,29 +61,17 @@ class ExtractedReceipt:
     ocr_metadata: OCRMetadata
 
 
-_CATEGORY_KEYWORDS = {
-    "Beverages": ("coffee", "juice", "soda", "water", "tea"),
-    "Produce": ("apple", "banana", "lettuce", "tomato", "onion", "produce"),
-    "Household": ("cleaner", "paper towel", "trash bag", "detergent"),
-    "Frozen Meals": ("frozen", "ice cream"),
-    "Lawn & Garden": ("soil", "seed", "fertilizer", "garden"),
-    "Dairy": ("milk", "cheese", "yogurt", "butter"),
-    "Meat": ("beef", "chicken", "pork", "turkey", "meat"),
-    "Bakery": ("bread", "bun", "cake", "muffin", "bakery"),
-    "Snacks": ("chip", "cracker", "cookie", "snack"),
-    "Personal Care": ("shampoo", "soap", "toothpaste", "deodorant"),
-}
+def classify_merchandise(
+    description: str, rules: tuple[CategoryRuleSpec, ...] | None = None
+) -> str:
+    if rules is None:
+        return classify_description(description)
+    return classify_description(description, rules)
 
 
-def classify_merchandise(description: str) -> str:
-    normalized = description.casefold()
-    for category, keywords in _CATEGORY_KEYWORDS.items():
-        if any(keyword in normalized for keyword in keywords):
-            return category
-    return "Other"
-
-
-def normalize_receipt(document: dict[str, Any]) -> ExtractedReceipt:
+def normalize_receipt(
+    document: dict[str, Any], rules: tuple[CategoryRuleSpec, ...] | None = None
+) -> ExtractedReceipt:
     header = document["receipt"]
     raw_date = str(header["date"])
     raw_time = str(header["time"])
@@ -93,7 +83,7 @@ def normalize_receipt(document: dict[str, Any]) -> ExtractedReceipt:
         f"{store}|{receipt_date.isoformat()}|{receipt_time.isoformat()}|{transaction_number}"
     )
 
-    items = tuple(_normalize_item(item) for item in document.get("items", []))
+    items = tuple(_normalize_item(item, rules) for item in document.get("items", []))
     total = _decimal(header["total"])
     item_total = sum((item.line_total for item in items), Decimal("0"))
     ocr_metadata = _normalize_metadata(document.get("metadata", {}))
@@ -117,12 +107,14 @@ def normalize_receipt(document: dict[str, Any]) -> ExtractedReceipt:
     )
 
 
-def _normalize_item(item: dict[str, Any]) -> ReceiptItem:
+def _normalize_item(
+    item: dict[str, Any], rules: tuple[CategoryRuleSpec, ...] | None = None
+) -> ReceiptItem:
     description = str(item["description"]).strip()
     return ReceiptItem(
         description=description,
         line_total=_decimal(item["line_total"]),
-        category=classify_merchandise(description),
+        category=classify_merchandise(description, rules),
         upc=_optional_string(item.get("upc")),
         quantity=_optional_decimal(item.get("quantity")),
         weight_lb=_optional_decimal(item.get("weight_lb")),

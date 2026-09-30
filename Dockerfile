@@ -17,6 +17,8 @@ RUN uv sync --frozen --no-install-project
 
 COPY src ./src
 COPY tests ./tests
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
 RUN uv sync --frozen
 
 RUN useradd --create-home --uid 1000 mbs

@@ -8,6 +8,9 @@ This roadmap defines deployable release order. Capability numbers identify funct
 
 **In scope**
 - Authenticated upload of image/PDF, file validation, status/progress, receipt list/detail, manual correction, exact/near-duplicate safeguards, audit trail, and soft delete.
+- [ ] Allow selecting a local directory to batch-upload its receipt images/PDFs, including subfolders, with confirmation, per-file results, duplicate protection, bounded batch limits, and multi-file fallback where folder selection is unavailable (Capabilities 1.2 and 2.4; RM-020).
+- [ ] Deliver a side-by-side receipt review page showing the stored image beside editable extracted values. Capture each line as package count × pack size × pack unit using a minimal unit/alias catalog, allow filling missing data and adding/removing lines, and remember confirmed pack sizes. Cross-dimension conversions wait for MVP 3 (Capabilities 2.5 and 2.6; RM-021).
+- [ ] Deliver a Purchases / Receipts order-history screen for manually entered and scanned receipts, showing each order's reference, store, purchase date, and line-item count, with a clickable link to its saved header and item details (Capability 2.4; RM-019).
 - Local Tesseract + OpenCV is the selected provider. The source scan is saved in protected persistent file storage; Postgres stores normalized header/items, immutable raw OCR JSONB, and a versioned canonical receipt JSONB snapshot.
 - Exact SHA-256 matches are rejected before OCR. Local perceptual matches are held for review before OCR runs. A unique Receipt_ID check rejects different scans of an already-imported receipt after extraction.
 - Normal viewing, search, correction, and export use stored data and never invoke OCR. Rerun OCR is an explicit audited ADMIN action; failed local jobs retry idempotently without duplicating receipts.
@@ -17,7 +20,7 @@ This roadmap defines deployable release order. Capability numbers identify funct
 
 **Deferred:** Optional Google Document AI integration (with separate privacy and cost approvals), full cost/accounting logic, multi-receipt business dashboards, Square data, weekly operations, inventory valuation, tax packages, and messaging.
 
-**Done when:** a manager can upload, review/correct, classify and link receipt lines, save, then retrieve all parsed data after a container restart without another OCR run; duplicate paths do not overwrite data or cause unnecessary OCR work. The `receipt-mvp` profile in Capability 10 and the MVP 1 measures in [the implementation-readiness gate](02-implementation-readiness.md) must pass before promotion.
+**Done when:** a manager can upload, review/correct, classify and link receipt lines, save, then retrieve all parsed data after a container restart without another OCR run; duplicate paths do not overwrite data or cause unnecessary OCR work. Local development may use the mocked OCR boundary, but promotion requires the configured local Tesseract + OpenCV adapter, persisted PostgreSQL state, approved accuracy/review thresholds, and a passing `receipt-mvp` profile. The MVP 1 measures in [the implementation-readiness gate](02-implementation-readiness.md) must also pass before promotion.
 
 ## MVP 2 — Square Setup, Sales Activation & Market-Day Selling
 **Goal:** Establish the shared sales ledger and let a small business capture and close real market-day sales without duplicate or untraceable facts.
@@ -43,7 +46,7 @@ All MVP 2 market dates and effective periods use full `YYYY-MM-DD` dates, includ
 **Goal:** Expand the lightweight MVP 1 recipe data into the product, ingredient, sourcing, and costing system.
 
 **In scope**
-- Expand the minimum Variation ID product/cost records created in MVP 2 into the full product and ingredient masters; add recipe-to-product/ingredient mappings, quantities, units, and conversions.
+- Expand the minimum Variation ID product/cost records created in MVP 2 into the full product and ingredient masters; add recipe-to-product/ingredient mappings, quantities, units, and conversions. Normalize purchases to each item's base unit through same-dimension global factors and effective-dated per-item conversions (for example 1 pint strawberries ≈ 0.75 lb), extending the MVP 1 unit/alias catalog rather than replacing it (Capability 4.9; CO-001).
 - Add a `Perishable` checkbox to every stocked product, ingredient, and supply, checked by default; users explicitly uncheck durable items such as empty packaging cups. Set the target replenishment quantity and inventory unit for each item.
 - Record an initial counted on-hand quantity and unit for stocked products, ingredients, and supplies, plus dated purchase/manual correction movements. This lightweight stock ledger is the authoritative MVP 3 opening balance for MVP 4 shopping; define the opening-count date and retain count audit.
 - Manual and receipt-linked ingredient/product/supply purchases with retailer, store/location, quantity/unit, actual cost, receipt link, and effective-dated unit-cost history.

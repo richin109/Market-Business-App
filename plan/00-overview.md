@@ -9,6 +9,7 @@ Source of truth: [Python MBS v3.3 + Receipt OCR Blueprint.docx](Python%20MBS%20v
 - Capability numbers identify functional areas; deploy in the staged order defined by [01-mvp-roadmap.md](01-mvp-roadmap.md), not by capability number alone.
 - Complete the [implementation-readiness gate](02-implementation-readiness.md) before using real business data or approving an MVP 1 production release. Local development with synthetic data and mocked providers may proceed while the gate is open.
 - Use [03-current-slice.md](03-current-slice.md) as the single source for the next bounded implementation task; do not infer task priority from capability numbering or unchecked boxes alone.
+- Use [mvp-slice-specifications.md](mvp-slice-specifications.md) as the approved slice contract for MVP 2-8. Future MVP prose is not an implementation instruction until its row is copied into `03-current-slice.md` with evidence links.
 - The source artifacts are evidence, not permission to override this plan's confirmed decisions. In particular, `support/Devin_MBS_v3_3_Prompt.txt` and its DOCX counterpart are historical project prompts; their Java/Spring/React/Kubernetes stack is superseded by the Python-native decisions below. The source workbook and blueprint remain references subject to the precedence in the readiness gate.
 - [test-case-manifest.csv](test-case-manifest.csv) is the required traceability artifact. Its presence does not mean its case mappings or release evidence are complete.
 
@@ -22,6 +23,15 @@ Source of truth: [Python MBS v3.3 + Receipt OCR Blueprint.docx](Python%20MBS%20v
 | UI | Web-based only, **Python-native stack**: FastAPI + Jinja2 templates + HTMX + Alpine.js + Tailwind CSS. Production serves a version-pinned static CSS asset generated with Tailwind's standalone CLI; the CDN is permitted only for local prototyping. No Node.js build pipeline, no separate frontend service/repo. The original blueprint's React/TypeScript frontend was inherited from a prior Java-based implementation and is dropped in favor of a stack that matches the Python backend — fewer moving parts, one language, one deployable service. Charts (KPI dashboards) render via Chart.js or Plotly, embedded directly in server-rendered pages, no bundler required. No desktop/mobile app. |
 | Dev environment | This laptop, via Docker Compose (Postgres, Redis, FastAPI+Jinja2/HTMX web app, Celery). |
 | Production environment | Self-hosted **Proxmox VM** running Docker Compose + Caddy (reverse proxy/TLS) + scheduled backups. Kubernetes from the original blueprint is dropped as over-scaled for this workload; can be revisited later if usage grows. See [11-deployment-infrastructure.md](capabilities/11-deployment-infrastructure.md). |
+
+## MVP 1 Implementation Boundary
+
+The receipt work is split into two explicit boundaries:
+
+- **Local development slices S1-S8:** provider-neutral OCR contracts may use deterministic mocked extraction, synthetic files, and local database fixtures. These slices may be implemented and validated without real receipt data, live providers, or installed OCR binaries.
+- **Receipt MVP release:** the `receipt-mvp` profile must run the configured local Tesseract + OpenCV adapter against synthetic image/PDF fixtures in the release-like web/worker image, persist the extraction and normalized receipt state in PostgreSQL, and record the approved OCR accuracy/review thresholds. A mocked provider test is necessary for deterministic unit coverage but is not sufficient evidence for MVP 1 production promotion.
+
+Google Document AI remains outside both boundaries until its separate privacy, region, cost, and provider approvals are recorded.
 
 ## Python Implementation Baseline
 - Minimum Python version: 3.12. Declare runtime and dependency constraints in `pyproject.toml`; commit a reproducible dependency lock file.
@@ -75,3 +85,16 @@ Use [01-mvp-roadmap.md](01-mvp-roadmap.md) for the confirmed sequence: Receipts 
 - MVP 2 sales activation requires Catalog sync plus minimum product/cost and market/location/dated-visit setup; accept passing order lines and keep unresolved lines outside the accepted ledger. Thereafter, business-record and product/market updates feed inventory/COGS and rankings, then dashboards and testing. Receipt upload/OCR/storage remains the independent MVP 1 release. Tax workpapers use approved records and retain source lineage and a year-specific snapshot.
 - Market-day selling uses Capability 14's canonical sale/refund services and Capability 6's inventory movements; it must not create parallel sales or stock ledgers. Production requires an explicit online-versus-offline operating decision, tender closeout, helper permissions, and recovery tests for duplicate or pending submissions.
 - Domain writes use database transactions and unique source-event/idempotency constraints. A receipt approval posts its linked business record atomically; a production confirmation commits its production event, stock movements, and fractional-waste remainder atomically. External provider calls use persisted workflow states and reconciliation; do not claim an external API side effect is exactly-once.
+
+## Cross-Capability Contracts
+
+These contracts are authoritative for implementation slices. Capability files may add detail but must not redefine them silently.
+
+| Contract | Authority and invariant |
+|---|---|
+| Identity and ownership | Square Variation ID is the product identity. Square provider facts belong to Capability 3 staging; accepted sales and reconciliation belong to Capability 14; market visits and schedules belong to Capability 5; inventory movements belong to Capability 6; market-day sessions use those services and never create parallel ledgers. |
+| State and totals | Provider-staged, pending, accepted, import-exception, operationally-closed, and settlement-reconciled states must follow the approved transition table in [04-go-no-go.md](04-go-no-go.md). Only accepted business records affect sales, inventory, and tax totals; pending and exception amounts remain separately labelled. |
+| Time and effective dates | Persist UTC instants plus the configured IANA `business_timezone`. Persist complete ISO business dates. Effective-dated records use inclusive full-date ranges, reject overlaps, and resolve historical records using the date of the event rather than current settings. |
+| Corrections | Imported facts, accepted sales, costs, schedules, snapshots, and exports are immutable. Corrections append linked reversal, adjustment, replacement, or restatement records with actor, reason, timestamp, and source lineage. |
+| Idempotency and transactions | Every domain write has a stable source-event/idempotency key and database uniqueness protection. A receipt approval, production confirmation, sale acceptance, or stock allocation commits all local effects atomically; external API calls use persisted workflow states and reconciliation rather than an exactly-once claim. |
+| Test isolation and evidence | `Test Record = Yes` rows are excluded from production aggregates. A plan checkbox is not complete until its focused test, runnable command, migration/profile evidence, and manifest row are verified against the actual repository. |
