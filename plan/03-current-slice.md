@@ -17,155 +17,30 @@ A nine-way independent review found that several checked steps are component-tes
 - [ ] **R7 — Settings catalog (RT093).** Reconcile seeded keys with Capability 9.1 through a new migration (`week_start` → `week_starts_on`, add the missing catalog keys, and **keep** `currency`/`tax_year`/the two receipt-retention keys, which D-65 documents in the catalog), represent unset values as `NULL`, add a minimal settings reader with one real caller, and write `tbl_error_log` from at least one failure path or mark Capability 9.3 as not started. **Replace RT093's literal six-settings assertion with a catalog-driven one:** derive the expected keys from the documented Capability 9.1 catalog, assert every documented key is seeded with its documented default, assert unset values are `NULL`, and assert no undocumented key exists. A hard-coded count must not reappear, because it breaks on every future catalog change. RT093 returned to `PLANNED` on 2026-09-30 for this reason and becomes `VERIFIED` again when the catalog-driven assertion passes. Validate with `uv run --frozen pytest tests/test_database_baseline.py -q`.
 - [ ] **R8 — Upload store hygiene.** Make protected-file save idempotent for identical content (or clean up on OCR failure) so a retry cannot raise `FileExistsError`; remove temp files on write failure; keep the true terminal reason for infected and duplicate-ID uploads; persist held near-match bytes and audit both resolution outcomes; add a false-positive pHash test with a clearly different image. Validate with `uv run --frozen pytest tests/test_receipt_upload.py tests/test_receipt_storage.py tests/test_receipt_duplicates.py -q`.
 
-## Completed Task — S8 Receipt Review and Correction Persistence
+## Active Next Step & Decisions Authority
 
-> Reopened 2026-09-30: the reason, audit-lineage, and ADMIN-resolution parts of this scope were not implemented. Remediation R2 completes them under approved D-45.
+- **Next unchecked step:** remediation **R2 — Correction audit trail (D-45, RM-027, RM-013)**, followed by R1 and R3.
+- **Approved decisions reference:** For approved owner decisions constraining current and future slices (D-00–D-76), refer directly to [04-go-no-go.md §5](04-go-no-go.md).
+- **Review gate (D-00):** After each slice passes validation, critically review touched code/tests/migrations, fix all findings, re-validate, and record findings in slice evidence.
 
-Persist manager corrections without changing immutable receipt identity or raw OCR evidence. This remains local development work and is permitted under the conditional-go status in [the implementation-readiness gate](02-implementation-readiness.md). The mocked OCR boundary remains the development provider; real local OCR is a separate release-readiness requirement.
+## Delivered Foundation Summary (S1–S9)
 
-**Scope**
-- Persist header and line-item corrections transactionally while leaving `raw_ocr_document` unchanged.
-- Refresh the versioned `receipt_document` snapshot from corrected normalized rows and retain reviewer, timestamp, reason, and audit lineage.
-- Detect a correction that would produce another receipt's `Receipt_ID`; hold it for explicit ADMIN resolution without changing `receipt_pk` or child links.
-- Keep review and read paths OCR-free and preserve the existing merchandise-category and business-disposition rules.
-- Exercise the persisted correction path with synthetic data; do not add real receipt files or live providers.
+Foundations exist as tested components; gaps identified during the 2026-09-30 audit are being addressed via the active R1–R8 remediation items above:
+- **S1 (Baseline):** SQLAlchemy models `tbl_settings`, `tbl_audit_log`, `tbl_error_log`, Alembic revision `0001_baseline`. RT093 linked (reopened in R7).
+- **S2 (Auth):** Argon2id users, session management with 12h absolute limit, CSRF, admin bootstrap/recovery, Alembic `0002_authentication`. RM-014 linked.
+- **S3 (Upload Boundary):** Protected storage, SHA-256 deduplication (RM-003 verified), MIME detection, scanner hook.
+- **S4 (OCR Tasks):** Provider boundary, synthetic extractor, Celery task entry point, retry logic. (Wiring/claim reopened in R1, R5).
+- **S5 (Persistence/Read APIs):** `tbl_receipt_uploads`, `tbl_receipts`, `tbl_receipt_items`, Alembic `0003_receipts`, authenticated list/detail APIs. RM-007 verified.
+- **S6 (Perceptual Duplicates):** pHash fingerprinting, near-match detection holding `POSSIBLE_DUPLICATE` (RM-004 verified).
+- **S7 (Category Rules):** `tbl_category_rules`, Alembic `0004_category_rules`, classification rules. RM-018 linked (reopened in R6).
+- **S8 (Corrections):** Normalized row correction, canonical snapshot refresh, collision hold. RM-008 verified; audit trail reopened in R2 (D-45).
+- **S9 (Approvals):** `tbl_receipt_line_approvals`, Alembic `0006_line_approvals`, idempotent 4-disposition approval (RM-011 verified).
 
-**Dependencies**
-- The Python stack and local services are confirmed in [the implementation overview](00-overview.md) and [Capability 11](capabilities/11-deployment-infrastructure.md).
-- Docker Desktop 29.8.1 with Compose v5.5.1 is installed and verified (U-1 done); the Compose stack is a validation environment, not a production approval.
-- WSL 2 distribution Ubuntu 26.04 LTS is installed and default (verified 2026-09-30: `wsl -l -v` shows `* Ubuntu-26.04` VERSION 2; WSL 3.0.1.0), per Capability 11.1. Docker Desktop 29.8.1 with Compose v5.5.1 is installed and verified (U-1 done).
-- No Square, Meta, or Google credentials, real receipts, or production infrastructure are required.
+After R1–R8, implement S14 and S15 before S10: manual entry and approved routing require canonical store and item identities. S10b then delivers the side-by-side review page with package count × pack size × pack unit capture and the minimal unit/alias catalog (Capabilities 2.5 and 2.6; RM-021). Per-item cross-dimension conversions belong to MVP 2 slice 2.3 (CO-001). Item imagery (S17; IM-001, IM-002) depends on S10b and S14–S16 because a confirmed candidate attaches to a store item and its canonical item.
 
-**Out of scope**
-- Real Tesseract/OpenCV engine integration, Google Document AI calls, PDF page rendering, production malware scanning, real data, and production deployment.
-- Any decision about market-specific timezone behavior, MVP 2 price/session allocation, or settlement state transitions.
+Review gate (D-00, approved 2026-09-30): after each slice or remediation item passes validation, critically review all code, tests, and migrations it touched, fix every finding, re-run validation, and record findings and fixes in its evidence before moving on. Stop and ask when a finding has no clear answer. S10 thin ingredient-purchase, ordinary-expense, capital-asset, and minimal ingredient/recipe records follow R1–R8 and S14–S15. Real Tesseract/OpenCV integration, database-backed job state, and PDF page rendering remain explicit local-profile work; production PDF malware scanning remains gated until S18-production.
 
-**Acceptance evidence**
-- Corrected normalized rows and the canonical snapshot remain consistent after persistence and reload.
-- `raw_ocr_document` and `receipt_pk` remain unchanged after correction.
-- A `Receipt_ID` collision is held for ADMIN resolution without overwriting either receipt.
-- Focused correction/persistence tests, the full test suite, Ruff, and mypy complete successfully.
-- No real receipt files, live providers, or real local OCR calls are used.
-
-**Validation commands used for this slice**
-- `uv run --frozen pytest tests/test_receipt_corrections.py tests/test_receipt_persistence.py -q`
-- `uv run --frozen pytest`
-- `uv run --frozen ruff check src tests`
-- `uv run --frozen mypy src tests`
-
-The foundation's Docker validation passed on 2026-09-30 (see evidence above).
-
-The focused correction command is the S8 target validation. Record any command adjustment in the README and Copilot instructions when the slice is implemented.
-
-## Owner Decisions and Scope Before Affected Work
-
-These approved decisions constrain future MVP 2 work but do not block local receipt remediation. Any new unresolved decision must be recorded before the affected work begins.
-
-| Decision | Clarification required | Affected plans |
-|---|---|---|
-| Timezone authority | D-01 approved 2026-09-30: one configurable `business_timezone` setting, seeded `America/New_York`, governs future MVP 2 market operating-hour interpretation and business-date assignment; historical dates and UTC instants do not change. | `00-overview.md`, Capabilities 5 and 14, MVP 2 |
-| Market-session price and availability | D-02 and D-51 approved: Square Catalog/Square data supplies price and sales facts; Market Planning supplies expected quantities; no local price override, physical count, or separate sales ledger is used. | Capabilities 4, 14, and 16; MVP 2 |
-| Sale and closeout states | D-03 approved 2026-09-30: use the transition table in §5 of [the go/no-go sheet](04-go-no-go.md); only accepted lines affect sales, inventory, and tax totals. | Capabilities 3, 14, and 16; Capability 10 sales-mvp |
-| Store registry and item mapping | D-37–D-40 are owner-approved in [the go/no-go sheet](04-go-no-go.md) §5. Do not reopen their substance by inference. | `00-overview.md`, Capabilities 1, 2, 4, 9, 15; MVP 1 |
-| Imagery and correction audit | D-41–D-45 are owner-approved 2026-09-30 in §5 (D-41, D-42, D-44 with owner modifications). R2 may proceed against D-45. | Capabilities 1, 2, 4, 9, 16; MVP 1/3 |
-| Square product sourcing and quantity | D-52/D-53 approved: Square Variation IDs identify sold products (effective recipe normally, direct canonical item for resale); plan targets create no stock. Approved receipts supply purchased quantity, explicit made events supply recipe-made finished quantity, and Square accepted line quantity subtracts finished units. Finalizing the shopping list sends one confirmed WhatsApp batch in MVP 4; later actual quantities do not resend. | Capabilities 2.8, 3.2, 4.1, 13, 15, 16; MVP 2–4 |
-| Direct Sell and final leftovers | D-54/D-55 approved: an approved receipt establishes Direct Sell stock (24 waters); confirming a market load of 6 allocates existing stock and Square selling 2 leaves 22 unsold overall. Only an effective recipe may elect end-of-plan waste for its unsold produced output; water has no recipe and follows its own item Shelf Life. | Capabilities 4, 6, 16; MVP 2–6 |
-| Provisional production and MVP gates | D-56 approved: MVP 2 made lots without recipes keep original reviewed cost/expiry and remain sellable after recipe activation, but historical ingredient-use gaps remain visible blocking exceptions until evidence-backed review. MVP 3 proves pure recipe waste; MVP 4 posts persistent remainders and minimal corrections; MVP 6 backfills previously read-excluded expiry once. Each prior MVP's local synthetic evidence gates the next build; real-data approvals gate promotion separately. | MVP 2–8; PR-001, PC-001, SL-004 |
-
-Follow the recorded decisions; ask the business owner before adding any rule not covered by them.
-
-## S1 Evidence — SQLAlchemy/Alembic Baseline
-
-- [x] Add synchronous SQLAlchemy base, session factory, and baseline models for `tbl_settings`, `tbl_audit_log`, and `tbl_error_log`.
-- [x] Add reviewed Alembic revision `0001_baseline` with six synthetic settings and no `create_all()` schema path.
-- [x] Link RT093 to `tests/test_database_baseline.py::test_baseline_migration_creates_seeded_settings_and_logs` in `plan/test-case-manifest.csv`.
-- [x] Validate host and Compose checks: focused migration test, full host suite, Ruff, and mypy.
-
-## S2 Evidence — Authentication Foundation
-
-- [x] Add persistent users with Argon2id password hashes and role authorization for ADMIN, MANAGER, and VIEWER.
-- [x] Add revocable opaque server sessions with an ADMIN-configurable idle timeout seeded to two hours and a fixed twelve-hour absolute expiry, plus CSRF token verification.
-- [x] Add one-time admin password reset records and a local `bootstrap-admin` CLI with no default password.
-- [x] Add login, current-user, logout, and admin user-list API routes with secure cookie flags and focused RM-014 coverage.
-- [x] Add Alembic revision `0002_authentication` and validate the migration chain on host and in Compose.
-- [x] Validate `29` host tests, Ruff, mypy, and the Compose S1/S2 focused tests, Ruff, and mypy.
-- [x] Add D-11/D-13 login and reset rate limits, audited admin recovery/reset routes, local bootstrap/recovery commands, and abuse-control tests. The throttle is process-local for this development slice; a shared store is still required before multi-worker production deployment.
-
-## S3 Evidence — Protected Receipt Upload Boundary
-
-- [x] Extend receipt upload validation with protected local storage, atomic file promotion, and media-type-derived keys.
-- [x] Define injectable scanner outcomes (`CLEAN`, `INFECTED`, `SCAN_PENDING`) without claiming a production malware scanner; D-09 scanning is future work for PDFs/source files, while authenticated JPEG/PNG imports use the approved no-scan exception.
-- [x] Add injectable outbox publication after protected storage and preserve exact SHA-256 duplicate protection.
-- [x] Add authenticated `POST /api/v1/receipts/upload` delegation with explicit invalid, duplicate, malware, and scanner-unavailable responses.
-- [x] Link RM-003 to its implemented exact-deduplication test; leave RM-001 planned because PDF page and image-dimension limits remain unimplemented.
-- [x] Validate 36 host tests, Ruff, mypy, and the full Compose test/lint/type suite.
-
-## S4 Evidence — OCR Task Boundary
-
-- [x] Add `LocalOCREngine` provider boundary with synthetic extractor injection and local provider/schema metadata defaults.
-- [ ] Add lease-aware job claims that block concurrent processing and permit reclaim after lease expiry. Reopened 2026-09-30: `InMemoryOCRJobStore.claim()` is unlocked and per-process under Celery prefork, reclaim-after-expiry is untested, and `process()` reports RUNNING/REVIEW jobs as SUCCEEDED (R5).
-- [x] Add idempotent OCR processing with retry, terminal review, and duplicate receipt-ID outcomes.
-- [x] Add Celery task entry point delegating to the configured processor. Audit note: the processor is never configured and the upload route never dispatches the task; OCR runs inline (R1).
-- [x] Validate four focused S4 tests, 40 host tests, Ruff, mypy, and the full Compose test/lint/type suite.
-- [ ] Integrate real Tesseract/OpenCV binaries and persist job/receipt state in PostgreSQL; this remains follow-up work.
-
-## S5 Evidence — Receipt Persistence and Read APIs
-
-- [x] Add `tbl_receipt_uploads`, `tbl_receipts`, and `tbl_receipt_items` SQLAlchemy models with reviewed Alembic revision `0003_receipts`.
-- [x] Preserve immutable source-derived Receipt_ID uniqueness, UUID receipt keys, raw OCR JSON, canonical receipt JSON, normalized line items, and protected file metadata.
-- [x] Add transaction-ready persistence helpers and fresh-database round-trip/unique-constraint tests.
-- [x] Add authenticated list/detail/items APIs with store/date filters, pagination, soft-delete visibility, and line-based item counts.
-- [x] Link RM-007 to the OCR-free persisted read API test.
-- [x] Validate 43 host tests, Ruff, mypy, and the full Compose test/lint/type suite.
-
-## After This Slice
-
-## S6 Evidence — Perceptual Duplicate Review
-
-- [x] Add injectable Pillow/imagehash perceptual fingerprints for synthetic image pages without hardcoded receipt files.
-- [x] Hold thresholded near matches as `POSSIBLE_DUPLICATE` before OCR and retain the pending source by SHA-256.
-- [x] Add explicit resolution for “already imported” versus “process as new,” preserving Receipt_ID deduplication. Audit note: service-level only; no HTTP route, no audit record, and held bytes are not persisted (R1, R8).
-- [x] Link RM-004 to the generated-image near-duplicate test.
-- [x] Validate 45 host tests, Ruff, mypy, and the full Compose test/lint/type suite.
-- [ ] Add PDF page rendering and persistent perceptual fingerprint records; keep this deferred until the page-renderer/storage boundary is approved.
-
-## After This Slice
-
-## S7 Evidence — Editable Category Rules
-
-- [x] Add `tbl_category_rules` with seeded Blueprint 6.5 keywords through Alembic revision `0004_category_rules`.
-- [ ] Load enabled database rules into normalization while preserving the existing remembered-item rule module. Reopened 2026-09-30: only the test passes DB rules to `normalize_receipt`; `upload.py` and `tasks.py` use hardcoded defaults, and the remembered-item module has no production caller (R1, R6).
-- [x] Prove a database-edited keyword changes merchandise classification without hardcoded receipt files.
-- [x] Link RM-018 to the focused editable-rule test.
-- [x] Validate 46 host tests, Ruff, mypy, and the full Compose test/lint/type suite.
-
-## After This Slice
-
-## S8 Evidence — Review and Correction Persistence
-
-- [x] Persist corrected receipt header and line-item rows in one transaction while preserving immutable raw OCR JSON and `receipt_pk`.
-- [x] Rebuild the canonical `receipt_document` snapshot from corrected normalized rows with reviewer audit metadata.
-- [ ] Hold `Receipt_ID` collisions for ADMIN resolution without overwriting either receipt or re-keying relationships. Reopened 2026-09-30: no resolution path exists, concurrent collisions raise `IntegrityError`, and the RM-013 test does not re-read either receipt after the attempt (R2).
-- [x] Link RM-008 and RM-013 to focused correction/persistence tests in `plan/test-case-manifest.csv`.
-- [x] Validate the focused S8 tests, 48-test host suite, Ruff, mypy, and equivalent Compose checks.
-
-## After This Slice
-
-## S9 Evidence — Idempotent Disposition Approval
-
-- [x] Add `tbl_receipt_line_approvals` through Alembic revision `0006_line_approvals` with one approval per receipt line and unique source event.
-- [x] Route Personal/Non-business to `NO_POST`; route the three business dispositions to their thin posting kinds.
-- [x] Add approval audit events and make repeated approvals idempotent while rejecting disposition changes.
-- [x] Link RM-011 to the focused four-disposition approval test.
-- [x] Validate 50 host tests, Ruff, mypy, and the full Compose test/lint/type suite.
-
-## After This Slice
-
-Next unchecked step: remediation R2 (correction audit trail, D-45 approved), then R1 and R3.
-
-Review gate (D-00, approved 2026-09-30): after each slice or remediation item passes validation, critically review all code, tests, and migrations it touched, fix every finding, re-run validation, and record findings and fixes in its evidence before moving on. Stop and ask when a finding has no clear answer. S10 thin ingredient-purchase, ordinary-expense, capital-asset, and minimal ingredient/recipe records follow R1–R3. Real Tesseract/OpenCV integration, database-backed job state, PDF page rendering, and production malware scanning remain explicit follow-up work; real-data OCR remains blocked until the readiness approvals are complete.
-
-Queued after S10: side-by-side receipt review page with package count × pack size × pack unit capture and the minimal unit/alias catalog (Capabilities 2.5 and 2.6; RM-021). Cross-dimension conversions remain MVP 3 (Capability 4.9; CO-001). Item and recipe imagery (S17; IM-001, IM-002) depends on that review page and on the S14–S16 store/item identity work, because a confirmed candidate image attaches to a store item and its canonical item.
+S10b must pass its focused RM-021 test, migration checks, and desktop/mobile Playwright review flow before S17 or S18-local; a prose queue item alone is not completion evidence.
 
 ## Queued Store & Item Identity Work — ST-001/ST-002, IT-001/IT-002
 
@@ -186,12 +61,13 @@ Queued after S10: side-by-side receipt review page with package count × pack si
 
 - [ ] Implement S17 media-asset store and item imagery (Capabilities 1.6, 2.9, and 4.10; D-41, D-42, D-43): `tbl_media_assets` keyed by SHA-256 content key plus `tbl_media_asset_links` with a partial unique index enforcing one active primary per owner, both through a reviewed Alembic migration. Add one ingest service that verifies file signatures, applies the D-09 validated JPEG/PNG no-scan exception (PDF/source-file scanning remains a future real-data gate), enforces `image_allowed_media_types`/`image_max_bytes`/`image_max_dimension_px`, strips EXIF, derives a thumbnail, and deduplicates by SHA-256 then perceptual hash. Extract embedded per-line product images during OCR with file/page/region provenance, excluding logos, barcodes, images below `receipt_image_min_dimension_px`, and the receipt page itself, and create them as PENDING candidates. Add reviewer confirm/reject on the side-by-side review page and MANAGER+ upload, mobile capture, reorder, primary change, and display-only detach on items and store items, with VIEWER read-only and full audit. Serve bytes and thumbnails under the receipt's authentication, role, and soft-delete rules.
 - [ ] Validate S17 with `uv run --frozen pytest tests/test_item_images.py -q`, a fresh-database and prior-revision upgrade migration test, the `receipt-mvp` Playwright gallery coverage, `uv run --frozen ruff check src tests`, `uv run --frozen mypy src tests`, and `uv run --frozen pytest`. Use synthetic source documents only; no real receipts and no live providers.
-- [ ] Do not build any image-generation component (D-44): items without an image show the default placeholder. Product, ingredient, supply, and recipe galleries land with MVP 3 slice 3.2a (IM-003, IM-004); automatic generation is a Capability 4 future enhancement.
+- [ ] Do not build any image-generation component (D-44): items without an image show the default placeholder. Product, ingredient, supply, and recipe galleries land with MVP 2 slice 2.4a after S17 (IM-003, IM-004); automatic generation is a Capability 4 future enhancement.
 - [ ] Leave this work unchecked until the implementation, migration, browser coverage, and manifest evidence exist in the repository (D-41–D-44 approved 2026-09-30).
 
 ## Queued Receipt MVP Certification — S18
 
-- [ ] Run the final `receipt-mvp` release profile only after S10, S10a, S11, S12, S13 backup/restore, S14, S15, S16, and S17 have passed their focused evidence. Record the candidate image digest, migrations, Playwright desktop/mobile results, redacted RM-024 evidence after its separate approval, and the D-06 release measures. S13 owns backup/restore only; it does not certify a profile whose store, item, and imagery requirements have not yet shipped.
+- [ ] **S18-local — prerequisite for synthetic MVP 2.** Run the synthetic `receipt-mvp` local profile only after S14, S15, S10, S10a, S10b, S11, S12, S13 backup/restore, S16, and S17 have passed their focused evidence. Record the candidate image digest, migrations, Playwright desktop/mobile results, and synthetic profile evidence. This is the predecessor profile required before MVP 2 may begin.
+- [ ] **S18-production — production promotion only.** After separate real-data authorization, record redacted RM-024 evidence, approved OCR/review thresholds, and the D-06 release measures against the candidate. It never blocks synthetic MVP 2 work.
 
 ## Future MVP Queue
 
