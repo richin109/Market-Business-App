@@ -18,6 +18,7 @@ Bounded context: `mbs/messaging/`. Send an explicitly reviewed WhatsApp message 
 - [ ] Outside the current customer-service window, allow only an approved Meta message template; inside the window, allow permitted free-form text. Check current Meta rules at send time and surface why a message type is unavailable.
 - [ ] Keep approved template names, language, category, status, and parameter schema synchronized or admin-maintained; validate required parameters before queuing.
 - [ ] Support a user-created send batch for two or more explicitly selected recipients, with an add-recipient control and no fixed UI recipient count. Enforce any configured safety cap and Meta's current limits; this is a manually initiated multi-recipient send, not a scheduled campaign or Marketing Messages API integration.
+- [ ] Finalizing a market shopping list with a confirmed recipient selection is a manually initiated batch, not an automated campaign. Key the batch to that finalized list version and recipient set; retry/reconcile ambiguous delivery against the same attempt rather than sending another batch. A later receipt, change in made quantity, Square sale, or list edit never sends another message without a new explicit finalization/send action (D-53).
 - [ ] Separately permit admin-configured, system-triggered utility alerts from approved application workflows (Capability 6.6), sent individually to configured, purpose-consented contacts using approved templates when required. This is not marketing automation and does not bypass opt-in, opt-out, service-window, or cost controls.
 
 ## Feature 13.3 — Compose & Send from the Application
@@ -41,7 +42,7 @@ Bounded context: `mbs/messaging/`. Send an explicitly reviewed WhatsApp message 
 
 ## Feature 13.5 — Development, Testing & Release
 - [ ] Feature complete
-- [ ] Use Meta's test WABA/phone numbers for development and CI; manual sends require explicit confirmation and automated low-stock sends require an enabled admin rule plus valid recorded opt-in; no real recipient can be messaged in tests.
+- [ ] Use mocked Meta transport and synthetic numbers in CI; an optional provider sandbox smoke test uses a test WABA/phone after U-5 test setup. Manual sends require explicit confirmation and automated low-stock sends require an enabled admin rule plus valid recorded opt-in; no real recipient can be messaged in CI.
 - [ ] Test the minimum-two recipient rule, adding more recipients, duplicate/ineligible recipient handling, per-recipient template rendering, partial batch failures, consent enforcement, opt-out suppression, E.164 validation, free-form/template window rules, idempotency, webhook replay, delivery-status transitions, and batch cost-limit blocks.
 - [ ] Keep test credentials separate from production; add Meta secrets to `.env.example` as names/placeholders only and to deployment secret provisioning, never as actual values.
 - [ ] Obtain user review of WhatsApp consent wording, privacy notice, retention period, and Meta business/account setup before production activation.

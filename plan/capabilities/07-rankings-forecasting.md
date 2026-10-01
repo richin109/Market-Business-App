@@ -19,7 +19,7 @@ Bounded contexts: `mbs/reporting/` + `mbs/forecasting/` (blueprint §3.1 #6/#8, 
 
 ## Feature 7.3 — Market Opportunity Engine
 - [ ] Feature complete
-- [ ] Capture manager-reviewed Revenue Growth, Profit Growth, Visit Frequency, and Reliability component scores for each market as-of date; each input is a numeric 0–100 score with reviewer/source note. These are source-workbook inputs, not formulas derived from the underlying metrics; do not invent a scoring algorithm.
+- [ ] Capture manager-reviewed Revenue Growth, Profit Growth, Visit Frequency, and Reliability component scores for each market with actor, timestamp, note, and history; each input is numeric 0–100. The last entered Business Score and Personal Score are the active values used for ranking and display until replaced by a newer entry. These are source-workbook inputs, not formulas derived from the underlying metrics; do not invent a scoring algorithm.
 - [ ] Calculate `Opportunity Score = Revenue Growth Score × 0.30 + Profit Growth Score × 0.35 + Visit Frequency Score × 0.15 + Reliability Score × 0.20`; clamp/validate inputs to 0–100; tiers are High at >=80, Medium at >=60, otherwise Low. Preserve the corresponding action (Increase Attendance, Monitor, Review).
 - [ ] Surface top/bottom opportunity markets on the Executive Dashboard (Capability 8).
 

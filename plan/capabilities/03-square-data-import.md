@@ -2,9 +2,9 @@
 
 - [ ] **Capability complete** (all features below checked)
 
-Bounded context: `src/mbs/integrations/square/` (blueprint §8, §9.4). Owns Square credentials, Catalog/Orders/Payments API access, raw staging, cursor management, and provider sync logs. Accepted Square sales facts, manual sales, COGS, and market assignment belong to Capability 14.
+Bounded context: `src/mbs/integrations/square/` (blueprint §8, §9.4). Owns Square credentials, Catalog/Orders/Payments API access, raw staging, cursor management, and provider sync logs. Accepted Square sales facts, COGS, and market assignment belong to Capability 14. The Square app/POS outside MBS captures every actual sale.
 
-MVP 2 Square payment capture uses the separate Square POS; this integration reads provider facts and does not initiate checkout. Before building a session UI, obtain owner approval of the capture/correlation decision D-16 in [the go/no-go assessment](../04-go-no-go.md). Without a provider-issued identity or an unambiguous authorized visit match, the app must show sync staleness or an import exception rather than create a local Square sale.
+MVP 2 Square payment capture uses the separate Square app/POS outside MBS; this integration only reads/imports provider facts and never initiates checkout or creates a separate sales system. D-16 data attribution is approved. Without a provider-issued identity or an unambiguous authorized visit match, MBS shows sync staleness or an import exception rather than inventing a local sale.
 
 **Blocking Square API gate:** MBS must never create, update, delete, cancel, refund, or otherwise attempt to change any data in Square. This applies to every app path, background job, admin action, retry, and test using a Square connection. All Square access goes through one provider adapter with an explicit allowlist of approved read-only API operations; reject unknown or mutating operations locally before any network request. HTTP `POST` is permitted only for documented read-only search operations on that allowlist (for example, Orders/Catalog search), never as a general write permission. The app's own `POST /api/v1/integrations/square/sync` starts a local read/import job and does not authorize a provider write. Changes to Square data are made only outside MBS in Square's own tools.
 
@@ -12,7 +12,7 @@ MVP 2 Square payment capture uses the separate Square POS; this integration read
 - [ ] Feature complete
 - [ ] 🧑‍💻 Confirm you have (or create) a Square seller account with the products/items you sell already in the Square Dashboard: https://squareup.com/dashboard
 - [ ] 🧑‍💻 Create a Square Developer account and application: https://developer.squareup.com/apps
-- [ ] 🧑‍💻 Decide sandbox vs. production: build and test against the **Sandbox** environment first (Square provides sandbox test data), then switch to production credentials for go-live. Sandbox guide: https://developer.squareup.com/docs/testing/sandbox
+- [ ] 🧑‍💻 Decide whether to enable optional Sandbox validation before live activation. Local development and recorded-fixture tests do not require a sandbox account (U-4); live activation still requires the read-only credential scope review and provider evidence in the `sales-mvp` gate. Sandbox guide: https://developer.squareup.com/docs/testing/sandbox
 - [ ] 🧑‍💻 Provision Square credentials with only the read permissions needed for Catalog, Orders, Payments, and Locations; prefer scoped OAuth credentials. Do not activate production sync with a broad Personal Access Token or any credential carrying Square write permissions. Record the granted permission set at activation and fail closed if it exceeds the approved read-only set.
 - [ ] 🧑‍💻 Note your **Location ID(s)** (each market/register may be its own Location in Square) via the Locations API or Dashboard → Account & Settings → Locations.
 - [ ] 🧑‍💻 Review Square's API rate limits and terms before wiring up scheduled polling: https://developer.squareup.com/docs/build-basics/rate-limiting
@@ -25,7 +25,8 @@ MVP 2 Square payment capture uses the separate Square POS; this integration read
 - [ ] Integrate Square **Catalog API** (`/v2/catalog/list` / `SearchCatalogObjects`) to pull items and variations: https://developer.squareup.com/reference/square/catalog-api
 - [ ] Land raw catalog objects into a staging table (`etl/landing/square_catalog.py` equivalent), unvalidated.
 - [ ] Normalize into Variation IDs + Item IDs (`etl/staging/catalog_staging.py` equivalent) — Variation ID is the permanent product key everywhere downstream (Governance Rule 1).
-- [ ] Scheduled periodic sync via Celery-beat (e.g., every N hours) plus an on-demand "Sync Now" trigger.
+- [ ] Keep raw catalog staging separate from product creation: product setup requires an explicitly confirmed Shelf Life before persistence. A Variation ID is not a purchase store item; its recipe or direct-resale canonical-item sourcing is completed later under D-52. An incomplete catalog row stays staged with a visible setup exception and no invented default Shelf Life.
+- [ ] Schedule the first Square sync 30 minutes after each market ends, then repeat every 24 hours while late or unresolved provider data remains; provide an authorized on-demand `Sync Now` trigger. Scheduled and manual runs share the same read-only adapter, cursor, idempotency, retry, and audit behavior.
 
 ## Feature 3.3 — Sales / Orders Sync
 - [ ] Feature complete
