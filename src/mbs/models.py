@@ -154,6 +154,7 @@ class Receipt(Base):
     ocr_schema_version: Mapped[str | None] = mapped_column(String(100))
     raw_ocr_document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     receipt_document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    receipt_document_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("tbl_users.id"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -203,6 +204,25 @@ class ReceiptCorrectionHold(Base):
     proposed_document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     reviewer_id: Mapped[int] = mapped_column(ForeignKey("tbl_users.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="PENDING")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ReceiptCorrection(Base):
+    __tablename__ = "tbl_receipt_corrections"
+    __table_args__ = (
+        UniqueConstraint("source_event_id", name="uq_tbl_receipt_corrections_source_event"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    receipt_pk: Mapped[str] = mapped_column(ForeignKey("tbl_receipts.receipt_pk"), nullable=False)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("tbl_users.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    before_document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    after_document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
