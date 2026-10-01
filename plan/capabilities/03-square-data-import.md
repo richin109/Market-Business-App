@@ -26,10 +26,11 @@ MVP 2 Square payment capture uses the separate Square app/POS outside MBS; this 
 - [ ] Land raw catalog objects into a staging table (`etl/landing/square_catalog.py` equivalent), unvalidated.
 - [ ] Normalize into Variation IDs + Item IDs (`etl/staging/catalog_staging.py` equivalent) — Variation ID is the permanent product key everywhere downstream (Governance Rule 1).
 - [ ] Keep raw catalog staging separate from product creation: product setup requires an explicitly confirmed Shelf Life before persistence. A Variation ID is not a purchase store item; its recipe or direct-resale canonical-item sourcing is completed later under D-52. An incomplete catalog row stays staged with a visible setup exception and no invented default Shelf Life.
-- [ ] Schedule the first Square sync 30 minutes after each market ends, then repeat every 24 hours while late or unresolved provider data remains; provide an authorized on-demand `Sync Now` trigger. Scheduled and manual runs share the same read-only adapter, cursor, idempotency, retry, and audit behavior.
+- [ ] MVP 2 Catalog sync runs only through an authorized `Sync Catalog Now` trigger; it uses the same read-only adapter, cursor, idempotency, retry, and audit behavior as later scheduled sync. Market-end scheduling, 24-hour retries, Orders/Payments staging, and provider-state settlement visibility begin in Feature 3.3/MVP 3 (D-69).
 
 ## Feature 3.3 — Sales / Orders Sync
 - [ ] Feature complete
+- [ ] In MVP 3, schedule the first Orders/Payments sync 30 minutes after each market ends, then repeat every 24 hours while late or unresolved provider data remains; provide an authorized on-demand `Sync Now` trigger. Scheduled and manual runs share the same read-only adapter, cursor, idempotency, retry, and audit behavior.
 - [ ] Integrate Square **Orders API** as the source of Square sale line items and amounts (replacing the blueprint's CSV import); Capability 14 decides which staged lines become canonical sales: https://developer.squareup.com/reference/square/orders-api
 - [ ] Land raw sales/order data into a staging table (`etl/landing/square_sales.py` equivalent).
 - [ ] Stage raw order data and stable Square identity (`Order ID` + `Line Item UID`) for the Capability 14 sales service; retain Variation ID, quantity, sale timestamp, amounts/discounts/taxes, status, and source IDs. Do not use a sync-batch ID as the source identity.
