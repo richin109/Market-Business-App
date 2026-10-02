@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.responses import Response
 
 from mbs.db import get_session
@@ -73,6 +74,9 @@ from mbs.routers.dependencies import (
 router = APIRouter(prefix="/api/v1", tags=["receipts"])
 logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(Path(__file__).parents[1] / "templates"))
+MAX_BATCH_FILES = 50
+MAX_BATCH_BYTES = 50_000_000
+MAX_BATCH_REQUEST_BYTES = MAX_BATCH_BYTES + 1_000_000
 
 
 class ReceiptItemAdditionRequest(BaseModel):
@@ -186,6 +190,101 @@ def manual_receipt_page(
         name="manual_receipt.html",
         context={"stores": stores},
     )
+
+
+@router.get("/receipts/upload/page", include_in_schema=False)
+def receipt_upload_page(
+    request: Request,
+    _current: tuple[User, AuthSession] = Depends(manager_session),  # noqa: B008
+) -> Response:
+    return templates.TemplateResponse(request=request, name="receipt_upload.html", context={})
+
+
+@router.post("/receipts/upload-batch")
+async def upload_receipt_batch(
+    request: Request,
+    current: tuple[User, AuthSession] = Depends(manager_csrf_session),  # noqa: B008
+    service: ReceiptUploadService = Depends(get_receipt_upload_service),  # noqa: B008
+    session: Session = Depends(get_session),  # noqa: B008
+) -> dict[str, object]:
+    user, _ = current
+    content_length = request.headers.get("content-length")
+    if content_length is None:
+        raise HTTPException(status_code=411, detail="Content-Length is required for batch upload")
+    try:
+        declared_length = int(content_length)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Content-Length"
+        ) from error
+    if declared_length > MAX_BATCH_REQUEST_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Batch request exceeds its limit"
+        )
+
+    form = await request.form(max_files=MAX_BATCH_FILES, max_fields=0, max_part_size=1024)
+    files = [
+        (key, value)
+        for key, value in form.multi_items()
+        if isinstance(value, StarletteUploadFile)
+    ]
+    if len(files) != len(form.multi_items()) or any(key != "files" for key, _ in files):
+        await form.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Batch upload accepts only repeated files fields",
+        )
+    if not files:
+        await form.close()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files selected")
+
+    results: list[dict[str, object]] = []
+    accepted_uploads: list[str] = []
+    total_bytes = 0
+    try:
+        for index, (_, file) in enumerate(files, start=1):
+            filename = Path((file.filename or f"file-{index}").replace("\\", "/")).name
+            result: dict[str, object] = {"filename": filename, "status": "INVALID"}
+            if file.size is not None and file.size > service.max_file_bytes:
+                result.update(status="TOO_LARGE", detail="File exceeds the per-file size limit")
+                results.append(result)
+                continue
+            source = await file.read(service.max_file_bytes + 1)
+            if len(source) > service.max_file_bytes:
+                result.update(status="TOO_LARGE", detail="File exceeds the per-file size limit")
+                results.append(result)
+                continue
+            if total_bytes + len(source) > MAX_BATCH_BYTES:
+                result.update(status="BATCH_LIMIT_EXCEEDED", detail="Batch exceeds the size limit")
+                results.append(result)
+                continue
+            total_bytes += len(source)
+            media_type = file.content_type or ""
+            try:
+                upload_result = service.upload(session, source, media_type, user.id)
+            except ValueError as error:
+                result.update(status="INVALID", detail=str(error))
+                results.append(result)
+                continue
+
+            result.update(
+                status=upload_result.status.value,
+                upload_pk=upload_result.upload_pk,
+                source_sha256=upload_result.source_sha256,
+                idempotent=upload_result.idempotent,
+            )
+            if upload_result.status is UploadStatus.QUEUED and upload_result.upload_pk is not None:
+                accepted_uploads.append(upload_result.upload_pk)
+            results.append(result)
+        session.commit()
+    finally:
+        await form.close()
+
+    for upload_pk in accepted_uploads:
+        service.index_committed_upload(session, upload_pk)
+    if accepted_uploads:
+        _request_outbox_dispatch()
+    return {"file_count": len(results), "total_bytes": total_bytes, "files": results}
 
 
 @router.post("/receipts/manual", status_code=status.HTTP_201_CREATED)
@@ -715,6 +814,23 @@ def receipt_review_page(
     if receipt is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
     raw_extraction = receipt.raw_ocr_document.get("extraction")
+    raw_header = receipt.raw_ocr_document.get("receipt")
+    extraction_evidence = {
+        "field_candidates": (
+            raw_extraction.get("field_candidates", {})
+            if isinstance(raw_extraction, dict)
+            else {}
+        ),
+        "issues": raw_extraction.get("issues", [])
+        if isinstance(raw_extraction, dict)
+        else [],
+        "references": (
+            raw_header.get("reference_candidates", {}) if isinstance(raw_header, dict) else {}
+        ),
+        "card_last_four": (
+            raw_header.get("card_last_four") if isinstance(raw_header, dict) else None
+        ),
+    }
     raw_confidences = (
         raw_extraction.get("field_confidence") if isinstance(raw_extraction, dict) else None
     )
@@ -846,7 +962,33 @@ def receipt_review_page(
         for remembered in remembered_items.values()
         if remembered.last_disposition is not None
     )
-    for line in lines:
+    raw_item_candidates = (
+        raw_extraction.get("item_candidates", {}) if isinstance(raw_extraction, dict) else {}
+    )
+    native_item_candidates = (
+        raw_item_candidates.get("native", [])
+        if isinstance(raw_item_candidates, dict)
+        else []
+    )
+    ocr_item_candidates = (
+        raw_item_candidates.get("ocr", []) if isinstance(raw_item_candidates, dict) else []
+    )
+    for line_index, line in enumerate(lines):
+        raw_item = line.raw_ocr_item if isinstance(line.raw_ocr_item, dict) else {}
+        native_item = (
+            native_item_candidates[line_index]
+            if isinstance(native_item_candidates, list)
+            and line_index < len(native_item_candidates)
+            and isinstance(native_item_candidates[line_index], dict)
+            else {}
+        )
+        ocr_item = (
+            ocr_item_candidates[line_index]
+            if isinstance(ocr_item_candidates, list)
+            and line_index < len(ocr_item_candidates)
+            and isinstance(ocr_item_candidates[line_index], dict)
+            else {}
+        )
         store_item = store_items.get(line.store_item_id) if line.store_item_id is not None else None
         canonical_item = canonical_items.get(line.item_id) if line.item_id is not None else None
         approval = approvals.get(line.id)
@@ -890,6 +1032,17 @@ def receipt_review_page(
             {
                 "id": line.id,
                 "description": line.description,
+                "extraction_evidence": {
+                    "merchant_item_number": raw_item.get("store_product_id")
+                    or raw_item.get("identifier_candidate"),
+                    "upc": raw_item.get("upc"),
+                    "printed_size": raw_item.get("printed_size"),
+                    "quantity": raw_item.get("quantity"),
+                    "weight_lb": raw_item.get("weight_lb"),
+                    "raw_line_text": raw_item.get("raw_line_text"),
+                    "native_candidate": native_item,
+                    "ocr_candidate": ocr_item,
+                },
                 "image_candidates": candidates_by_line.get(line.id, []),
                 "rule_suggestion": rule_suggestion,
                 "display_name": (
@@ -961,6 +1114,7 @@ def receipt_review_page(
             "corrections_locked": bool(approvals),
             "unit_aliases": UNIT_ALIASES,
             "attention_fields": attention_fields,
+            "extraction_evidence": extraction_evidence,
             "total_mismatch": receipt.receipt_document.get("total_mismatch") is True,
             "can_add_line": receipt.source_type == "MANUAL"
             or any(source["kind"] in {"PRIMARY", "SUPPLEMENT"} for source in source_views),

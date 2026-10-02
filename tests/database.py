@@ -11,21 +11,35 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 
 _databases: ContextVar[dict[Path, URL]] = ContextVar("test_databases")
+DEFAULT_TEST_DATABASE_URL = "postgresql+psycopg://localhost/mbs_test"
+
+
+def configure_application_test_database_url() -> str:
+    if os.environ.get("MBS_TEST_DATABASE_URL"):
+        value = configured_test_database_url().render_as_string(hide_password=False)
+    else:
+        value = DEFAULT_TEST_DATABASE_URL
+    os.environ["DATABASE_URL"] = value
+    return value
+
+
+def configured_test_database_url() -> URL:
+    configured = os.environ.get("MBS_TEST_DATABASE_URL")
+    if not configured:
+        raise RuntimeError("Run docker compose run --rm test, or set MBS_TEST_DATABASE_URL")
+    base = make_url(configured)
+    if base.get_backend_name() != "postgresql" or base.database not in {
+        "mbs_migration_test",
+        "mbs_test",
+    }:
+        raise RuntimeError("MBS_TEST_DATABASE_URL must target mbs_test or mbs_migration_test")
+    return base.set(drivername="postgresql+psycopg")
 
 
 def postgres_test_url(path: Path) -> str:
     databases = _databases.get()
     if path not in databases:
-        configured = os.environ.get("MBS_TEST_DATABASE_URL")
-        if not configured:
-            raise RuntimeError("Run docker compose run --rm test, or set MBS_TEST_DATABASE_URL")
-        base = make_url(configured)
-        if base.get_backend_name() != "postgresql" or base.database not in {
-            "mbs_migration_test",
-            "mbs_test",
-        }:
-            raise RuntimeError("MBS_TEST_DATABASE_URL must target mbs_test or mbs_migration_test")
-        base = base.set(drivername="postgresql+psycopg")
+        base = configured_test_database_url()
         name = f"mbs_test_{uuid4().hex}"
         engine = create_engine(base, isolation_level="AUTOCOMMIT")
         try:

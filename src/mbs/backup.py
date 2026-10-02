@@ -80,13 +80,29 @@ def verify_backup(backup_dir: Path) -> dict[str, object]:
     manifest = _read_manifest(backup_dir)
     problems: list[str] = []
     database_file = backup_dir / str(manifest["database_file"])
-    if not database_file.is_file() or _sha256(database_file) != manifest["database_sha256"]:
+    if (
+        database_file.is_symlink()
+        or not database_file.is_file()
+        or _sha256(database_file) != manifest["database_sha256"]
+    ):
         problems.append(f"database dump: {manifest['database_file']}")
     files = manifest["files"]
     if not isinstance(files, dict):
         raise BackupError("Backup manifest is invalid")
+    files_root = backup_dir / FILES_DIR
+    actual_files: set[str] = set()
+    if files_root.is_symlink():
+        raise BackupError("Backup contains a symbolic link")
+    if files_root.is_dir():
+        for path in files_root.rglob("*"):
+            if path.is_symlink():
+                raise BackupError("Backup contains a symbolic link")
+            if path.is_file():
+                actual_files.add(path.relative_to(files_root).as_posix())
+    if actual_files != set(files):
+        raise BackupError("Backup files do not match the manifest")
     for relative, digest in files.items():
-        copied = backup_dir / FILES_DIR / relative
+        copied = files_root / relative
         if not copied.is_file() or _sha256(copied) != digest:
             problems.append(f"file: {relative}")
     if problems:
@@ -195,6 +211,8 @@ def _copy_tree(source: Path, target: Path) -> dict[str, str]:
     if not source.is_dir():
         return checksums
     for path in sorted(source.rglob("*")):
+        if path.is_symlink():
+            raise BackupError(f"Symbolic links are not supported in protected storage: {path}")
         if not path.is_file():
             continue
         relative = path.relative_to(source)

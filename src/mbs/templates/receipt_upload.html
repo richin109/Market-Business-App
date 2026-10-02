@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch Receipt Upload | Market Business System</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f4f6f2; color: #1d2924; }
+    main { max-width: 920px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    h1 { margin: 0 0 1rem; font-size: 1.7rem; }
+    .upload-panel { display: grid; gap: .9rem; padding: 1rem; border: 1px solid #cdd7cf; border-radius: 5px; background: white; }
+    label { display: grid; gap: .3rem; font-weight: 600; }
+    input, button { min-width: 0; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    button { width: fit-content; background: #fff; color: #18392b; cursor: pointer; }
+    button:hover { background: #e7efe9; }
+    button:disabled { cursor: wait; opacity: .65; }
+    .selection-list, .result-list { display: grid; gap: .35rem; padding: 0; margin: 0; list-style: none; }
+    .selection-list li, .result-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; padding: .45rem 0; border-bottom: 1px solid #e2e8e3; overflow-wrap: anywhere; }
+    .status { color: #286143; }
+    .status[data-state="POSSIBLE_DUPLICATE"], .status[data-state="INVALID"], .status[data-state="TOO_LARGE"], .status[data-state="BATCH_LIMIT_EXCEEDED"], .status[data-state="SCAN_PENDING"] { color: #8a4b00; }
+    .message { min-height: 1.3rem; margin: 0; }
+    .message[data-error="true"] { color: #a2312c; }
+    @media (max-width: 540px) { main { padding: 1rem .7rem 2rem; } .upload-panel { padding: .7rem; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Batch Receipt Upload</h1>
+    <section class="upload-panel">
+      <label>Select a receipt folder
+        <input type="file" accept="image/jpeg,image/png,application/pdf" webkitdirectory directory multiple data-directory-input>
+      </label>
+      <p data-selection-summary role="status">No files selected</p>
+      <ul class="selection-list" data-selection-list></ul>
+      <button type="button" data-upload-button disabled>Upload selected files</button>
+      <p class="message" data-message role="status" aria-live="polite"></p>
+      <ul class="result-list" data-result-list aria-label="Per-file upload results"></ul>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const input = document.querySelector("[data-directory-input]");
+      const summary = document.querySelector("[data-selection-summary]");
+      const selectionList = document.querySelector("[data-selection-list]");
+      const resultList = document.querySelector("[data-result-list]");
+      const uploadButton = document.querySelector("[data-upload-button]");
+      const message = document.querySelector("[data-message]");
+      const maxFiles = 50;
+
+      function csrfToken() {
+        return document.cookie.split(";").map((part) => part.trim())
+          .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
+      }
+
+      function setMessage(value, error = false) {
+        message.textContent = value;
+        message.dataset.error = String(error);
+      }
+
+      input.addEventListener("change", () => {
+        const files = [...input.files];
+        selectionList.replaceChildren();
+        resultList.replaceChildren();
+        uploadButton.disabled = files.length === 0 || files.length > maxFiles;
+        summary.textContent = files.length > maxFiles
+          ? `Select no more than ${maxFiles} files.`
+          : files.length === 0 ? "No files selected" : `${files.length} files selected`;
+        for (const file of files.slice(0, maxFiles)) {
+          const row = document.createElement("li");
+          row.textContent = file.webkitRelativePath || file.name;
+          selectionList.append(row);
+        }
+        setMessage("");
+      });
+
+      uploadButton.addEventListener("click", async () => {
+        const files = [...input.files];
+        if (files.length === 0 || files.length > maxFiles) return;
+        uploadButton.disabled = true;
+        setMessage("Uploading files…");
+        const body = new FormData();
+        for (const file of files) body.append("files", file, file.webkitRelativePath || file.name);
+        try {
+          const response = await fetch("/api/v1/receipts/upload-batch", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "X-CSRF-Token": csrfToken() },
+            body,
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail ?? "Batch upload failed");
+          resultList.replaceChildren();
+          for (const file of result.files) {
+            const row = document.createElement("li");
+            const name = document.createElement("span");
+            const status = document.createElement("strong");
+            name.textContent = file.filename;
+            status.className = "status";
+            status.dataset.state = file.status;
+            status.textContent = file.idempotent ? `${file.status} · Already received` : file.status;
+            row.append(name, status);
+            resultList.append(row);
+          }
+          setMessage(`${result.file_count} file results received`);
+        } catch (error) {
+          setMessage(error.message, true);
+        } finally {
+          uploadButton.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

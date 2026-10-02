@@ -17,6 +17,7 @@ dependencies = [
     "pymupdf>=1.28.2",
     "pytesseract>=0.3.13",
     "opencv-python-headless>=5.0.0.93",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

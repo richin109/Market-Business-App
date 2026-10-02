@@ -1,15 +1,11 @@
-import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from tests.database import isolated_test_databases
+from tests.database import configure_application_test_database_url, isolated_test_databases
 
-os.environ.setdefault(
-    "DATABASE_URL",
-    os.environ.get("MBS_TEST_DATABASE_URL", "postgresql+psycopg://localhost/mbs_test"),
-)
+configure_application_test_database_url()
 
 
 @pytest.fixture(autouse=True)

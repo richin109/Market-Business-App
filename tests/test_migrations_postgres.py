@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,8 +9,9 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.engine import make_url
 from sqlalchemy.schema import CreateSchema, DropSchema
+
+from tests.database import configured_test_database_url
 
 ROOT = Path(__file__).parents[1]
 
@@ -19,13 +19,10 @@ ROOT = Path(__file__).parents[1]
 def test_postgres_migrations_round_trip_receipt_json_documents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    database_url = os.environ.get("MBS_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.fail("Run docker compose run --rm test, or set MBS_TEST_DATABASE_URL")
-
-    base_url = make_url(database_url)
-    if base_url.get_backend_name() != "postgresql":
-        pytest.fail("MBS_TEST_DATABASE_URL must use PostgreSQL")
+    try:
+        base_url = configured_test_database_url()
+    except RuntimeError as error:
+        pytest.fail(str(error))
 
     schema_name = f"migration_test_{uuid4().hex}"
     admin_engine = create_engine(base_url)

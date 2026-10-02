@@ -193,6 +193,218 @@ def test_manager_review_preselects_remembered_subtype_without_auto_approval(
         engine.dispose()
 
 
+def test_rm_023_manager_review_displays_candidates_and_corrects_without_approval(
+    tmp_path: Path,
+    page: Page,
+) -> None:
+    engine, session_factory = _database(tmp_path / "rm-023-evidence-review.db")
+    with session_factory.begin() as session:
+        manager = create_user(session, "rm023-review-manager", "synthetic password", Role.MANAGER)
+        token, _ = create_session(session, manager)
+        receipt = persist_extracted_receipt(
+            session,
+            normalize_receipt(
+                {
+                    "receipt": {
+                        "store": "Synthetic Evidence Market",
+                        "date": "2026-10-02",
+                        "time": "09:30:00",
+                        "transaction_number": "RM023-REVIEW-1",
+                        "subtotal": "1.00",
+                        "tax": "0.06",
+                        "total": "1.06",
+                        "reference_candidates": {
+                            "transaction_reference": "0002",
+                            "printed_reference": "0003",
+                        },
+                    },
+                    "items": [
+                        {
+                            "description": "Synthetic packaged item",
+                            "store_product_id": "12345678",
+                            "upc": "00012345",
+                            "quantity": None,
+                            "weight_lb": None,
+                            "printed_size": None,
+                            "line_total": "1.00",
+                            "identifier_candidate": "12345678",
+                            "raw_line_text": (
+                                "ITEM # 12345678 UPC: 00012345 18 OZ; "
+                                "native amount $1.00; OCR amount $1.06"
+                            ),
+                        }
+                    ],
+                    "extraction": {
+                        "field_candidates": {
+                            "total": {
+                                "native": "1.00",
+                                "ocr": "1.06",
+                                "selected": "1.06",
+                                "selected_source": "OCR",
+                            }
+                        },
+                        "field_sources": {"total": "OCR"},
+                        "issues": ["AMBIGUOUS_PRINTED_TIMESTAMPS"],
+                        "missing_fields": [],
+                    },
+                }
+            ),
+        )
+        receipt_pk = receipt.receipt_pk
+
+    app.dependency_overrides[get_session] = _session_override(session_factory)
+    try:
+        response = TestClient(app).get(
+            f"/api/v1/receipts/{receipt_pk}/review",
+            headers={"Cookie": f"mbs_session={token}"},
+        )
+        assert response.status_code == 200
+        correction_requests: list[dict[str, Any]] = []
+        approval_requests: list[str] = []
+
+        def route_correction(route: Any) -> None:
+            correction_requests.append(
+                {"headers": route.request.headers, "body": route.request.post_data_json}
+            )
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"status": "UPDATED", "document_version": 2}),
+            )
+
+        page.context.add_cookies(
+            [{"name": "mbs_csrf", "value": "rm023-review-csrf", "url": "http://testserver"}]
+        )
+        page.route("**/corrections", route_correction)
+        page.route("**/approval", lambda route: approval_requests.append(route.request.url))
+        page.route("http://testserver/", lambda route: route.fulfill(body=response.text))
+        page.goto("http://testserver/")
+        page.set_content(response.text)
+
+        assert page.locator('.line[data-approved="false"]').count() == 1
+        evidence = page.locator("[data-extraction-evidence]")
+        assert evidence.count() == 1
+        evidence.locator("summary").click()
+        assert "1.00" in evidence.inner_text()
+        assert "1.06" in evidence.inner_text()
+        assert "OCR" in evidence.inner_text()
+        assert "0002" in evidence.inner_text()
+        line = page.locator(".line").first
+        raw_line_evidence = line.locator("[data-line-evidence]")
+        raw_line_evidence.locator("summary").click()
+        assert "12345678" in raw_line_evidence.inner_text()
+        assert "00012345" in raw_line_evidence.inner_text()
+        assert "18 OZ" in raw_line_evidence.inner_text()
+        assert "AMBIGUOUS_PRINTED_TIMESTAMPS" in page.locator(".review-warning").inner_text()
+
+        correction = line.locator(".correction-form")
+        correction.locator("input[name='upc']").fill("000123456789")
+        correction.locator("textarea[name='reason']").fill("Verified printed UPC")
+        correction.get_by_role("button", name="Save line correction").click()
+        correction.locator("[role='status']").filter(has_text="Saved version 2").wait_for()
+        assert correction_requests[0]["body"]["item_updates"]["0"]["upc"] == "000123456789"
+        assert correction_requests[0]["headers"]["x-csrf-token"] == "rm023-review-csrf"
+        assert correction_requests[0]["body"]["reason"] == "Verified printed UPC"
+        assert approval_requests == []
+        for width in (1280, 390):
+            page.set_viewport_size({"width": width, "height": 900})
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def test_directory_batch_page_previews_folder_and_shows_idempotent_replay(
+    tmp_path: Path,
+    page: Page,
+) -> None:
+    engine, session_factory = _database(tmp_path / "directory-batch-page.db")
+    with session_factory.begin() as session:
+        manager = create_user(session, "directory-page-manager", "synthetic password", Role.MANAGER)
+        token, _ = create_session(session, manager)
+        viewer = create_user(session, "directory-page-viewer", "synthetic password", Role.VIEWER)
+        viewer_token, _ = create_session(session, viewer)
+
+    selected_root = tmp_path / "selected-folder"
+    nested_folder = selected_root / "nested"
+    nested_folder.mkdir(parents=True)
+    (nested_folder / "synthetic.pdf").write_bytes(_synthetic_pdf(1))
+    image_buffer = BytesIO()
+    Image.new("RGB", (16, 12), color=(35, 110, 70)).save(image_buffer, format="PNG")
+    (selected_root / "synthetic.png").write_bytes(image_buffer.getvalue())
+
+    app.dependency_overrides[get_session] = _session_override(session_factory)
+    try:
+        response = TestClient(app).get(
+            "/api/v1/receipts/upload/page",
+            headers={"Cookie": f"mbs_session={token}"},
+        )
+        viewer_response = TestClient(app).get(
+            "/api/v1/receipts/upload/page",
+            headers={"Cookie": f"mbs_session={viewer_token}"},
+        )
+        assert response.status_code == 200
+        assert viewer_response.status_code == 403
+        requests: list[dict[str, Any]] = []
+
+        def route_batch(route: Any) -> None:
+            requests.append(
+                {
+                    "headers": route.request.headers,
+                    "body": route.request.post_data or "",
+                }
+            )
+            replay = len(requests) == 2
+            files = [
+                {"filename": "synthetic.pdf", "status": "EXACT_DUPLICATE", "idempotent": True},
+                {"filename": "synthetic.png", "status": "EXACT_DUPLICATE", "idempotent": True},
+            ] if replay else [
+                {"filename": "synthetic.pdf", "status": "QUEUED", "idempotent": False},
+                {"filename": "synthetic.png", "status": "QUEUED", "idempotent": False},
+            ]
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"file_count": 2, "total_bytes": 200, "files": files}),
+            )
+
+        page.context.add_cookies(
+            [{"name": "mbs_csrf", "value": "directory-batch-csrf", "url": "http://testserver"}]
+        )
+        page.route("**/api/v1/receipts/upload-batch", route_batch)
+        page.route("http://testserver/", lambda route: route.fulfill(body=response.text))
+        page.goto("http://testserver/")
+        page.set_content(response.text)
+        directory_input = page.locator("[data-directory-input]")
+        directory_input.set_input_files(str(selected_root))
+        assert page.locator("[data-selection-summary]").inner_text() == "2 files selected"
+        selection = page.locator("[data-selection-list]").inner_text()
+        assert "nested/synthetic.pdf" in selection
+        assert "synthetic.png" in selection
+
+        upload_button = page.locator("[data-upload-button]")
+        upload_button.click()
+        page.wait_for_function(
+            "document.querySelector('[data-result-list]').innerText.includes('QUEUED')"
+        )
+        assert page.locator("[data-result-list]").inner_text().count("QUEUED") == 2
+        assert requests[0]["headers"]["x-csrf-token"] == "directory-batch-csrf"
+        assert "nested/synthetic.pdf" in requests[0]["body"]
+
+        upload_button.click()
+        page.wait_for_function(
+            "document.querySelector('[data-result-list]').innerText.includes('EXACT_DUPLICATE')"
+        )
+        assert page.locator("[data-result-list]").inner_text().count("Already received") == 2
+        assert requests[1]["headers"]["x-csrf-token"] == "directory-batch-csrf"
+        for width in (1280, 390):
+            page.set_viewport_size({"width": width, "height": 900})
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
 def test_repeat_item_can_be_personal_and_expense_reroute_stays_held(
     tmp_path: Path,
     page: Page,

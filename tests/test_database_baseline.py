@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -9,7 +10,41 @@ from sqlalchemy.orm import Session
 
 from mbs.models import Base, Setting
 from mbs.settings import read_setting
-from tests.database import postgres_test_url
+from tests.database import (
+    configure_application_test_database_url,
+    configured_test_database_url,
+    postgres_test_url,
+)
+
+
+def test_test_bootstrap_overrides_inherited_application_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_url = "postgresql+psycopg://synthetic:synthetic@localhost/mbs_test"
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://app:secret@localhost/production")
+    monkeypatch.setenv("MBS_TEST_DATABASE_URL", test_url)
+
+    assert configure_application_test_database_url() == test_url
+    assert os.environ["DATABASE_URL"] == test_url
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "postgresql+psycopg://synthetic:synthetic@localhost/production",
+        "mysql+pymysql://synthetic:synthetic@localhost/mbs_test",
+    ],
+)
+def test_configured_test_database_url_rejects_non_test_targets(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("MBS_TEST_DATABASE_URL", value)
+
+    with pytest.raises(RuntimeError, match="must target mbs_test or mbs_migration_test"):
+        configured_test_database_url()
+
+    with pytest.raises(RuntimeError, match="must target mbs_test or mbs_migration_test"):
+        configure_application_test_database_url()
 
 
 @pytest.mark.parametrize("value", ["mysql+pymysql://localhost/mbs", "mssql+pyodbc://localhost/mbs"])

@@ -66,11 +66,39 @@ def _synthetic_receipt_text() -> str:
         "Quantity: 2\n"
         "Size: 2 LB\n"
         "ASIN: SYN-ITEM-7\n"
+        "UPC: 000123456789\n"
         "Sold by: Amazon\n"
         "Supplied by: Amazon\n"
         "Return window closes October 31, 2026\n"
         "$4.00"
     )
+
+
+def _synthetic_order_sheet_text(order_count: int) -> str:
+    orders = []
+    for order_number in range(1, order_count + 1):
+        orders.append(
+            "\n".join(
+                [
+                    "Amazon",
+                    "Order placed October 2, 2026",
+                    f"Order # SYN-ORDER-{order_number:03d}",
+                    f"Time: 09:{order_number:02d} AM",
+                    "Payment method Visa",
+                    "Item (1) Subtotal: $1.00",
+                    "Estimated tax: $0.06",
+                    "Order total: $1.06",
+                    "Delivered October 2, 2026",
+                    f"Synthetic item {order_number:03d}",
+                    "Quantity: 1",
+                    "Size: 1 CT",
+                    f"ASIN: SYN-ITEM-{order_number:03d}",
+                    f"UPC: {order_number:012d}",
+                    "$1.00",
+                ]
+            )
+        )
+    return "\n".join(orders)
 
 
 def test_selectable_text_pdf_uses_native_text_without_ocr() -> None:
@@ -169,6 +197,7 @@ def test_structured_parser_returns_distinct_receipt_fields_and_review_confidence
     assert len(document["items"]) == 1
     assert document["items"][0]["description"] == "SYNTHETIC APPLES"
     assert document["items"][0]["store_product_id"] == "SYN-ITEM-7"
+    assert document["items"][0]["upc"] == "000123456789"
     assert document["items"][0]["quantity"] == "2"
     assert document["items"][0]["weight_lb"] is None
     assert document["items"][0]["printed_size"] == "2 LB"
@@ -338,6 +367,175 @@ def test_walmart_image_page_parses_rows_taxes_and_holds_ambiguous_references() -
     assert "VENDOR_REFERENCE_REQUIRES_REVIEW" in issues
     assert "AMBIGUOUS_PRINTED_TIMESTAMPS" in issues
     assert document["review_required"] is True
+
+
+def test_rm_023_image_pdf_keeps_merchant_id_upc_weight_and_header_evidence_distinct() -> None:
+    text = "\n".join(
+        [
+            "WALMART",
+            "ST# 0001 OP# 000001 TE# 01 TR# 0002",
+            "SYN PACKAGED ITEM ITEM # 12345678 UPC: 000123456789 18 OZ F 4.50",
+            "SYN REPEAT ITEM ITEM # 87654321 UPC: 000987654321 F 1.00",
+            "SYN REPEAT ITEM ITEM # 87654321 UPC: 000987654321 F 1.00",
+            "SYN REPEAT ITEM ITEM # 11223344 UPC: 000112233445 F 1.00",
+            "SYN WEIGHED ITEM 223344556677 F 1.50",
+            "WEIGHT 1.50 LB",
+            "SUBTOTAL 8.00",
+            "TAX 6.0000 % 0.48",
+            "TOTAL 8.48",
+            "VISA **** 4827",
+            "REF # 000000000003",
+            "01/02/2024 10:15:00",
+            "01/02/2024 10:21:00",
+        ]
+    )
+
+    document = extract_receipt_document(
+        _image_pdf(text),
+        "application/pdf",
+        lambda _page, _number: (text, Decimal("0.95")),
+    )
+
+    receipt = document["receipt"]
+    packaged, repeat_one, repeat_two, same_description, weighed = document["items"]
+    assert packaged["store_product_id"] == "12345678"
+    assert packaged["upc"] == "000123456789"
+    assert packaged["identifier_candidate"] == "12345678"
+    assert packaged["printed_size"] == "18 OZ"
+    assert packaged["weight_lb"] is None
+    assert "ITEM # 12345678 UPC: 000123456789" in packaged["raw_line_text"]
+    assert repeat_one["store_product_id"] == repeat_two["store_product_id"] == "87654321"
+    assert repeat_one["description"] == repeat_two["description"]
+    assert repeat_one["line_total"] == repeat_two["line_total"] == "1.00"
+    assert same_description["description"] == repeat_one["description"]
+    assert same_description["store_product_id"] == "11223344"
+    assert same_description["store_product_id"] != repeat_one["store_product_id"]
+    assert weighed["weight_lb"] == "1.50"
+    assert weighed["printed_size"] is None
+    assert receipt["reference_candidates"]["transaction_reference"] == "0002"
+    assert receipt["reference_candidates"]["printed_reference"] == "000000000003"
+    assert receipt["time"] is None
+    assert receipt["card_last_four"] == "4827"
+    assert receipt["subtotal"] == "8.00"
+    assert receipt["tax"] == "0.48"
+    assert receipt["total"] == "8.48"
+    assert "AMBIGUOUS_PRINTED_TIMESTAMPS" in document["extraction"]["issues"]
+    assert document["review_required"] is True
+
+    masked_text = text.replace("VISA **** 4827", "VISA ****")
+    masked_document = extract_receipt_document(
+        _image_pdf(masked_text),
+        "application/pdf",
+        lambda _page, _number: (masked_text, Decimal("0.95")),
+    )
+    assert masked_document["receipt"]["card_last_four"] is None
+
+
+@pytest.mark.skipif(
+    shutil.which("tesseract") is None, reason="Local Tesseract executable is unavailable"
+)
+def test_rm_023_real_ocr_holds_incomplete_image_only_item_evidence() -> None:
+    text = "\n".join(
+        [
+            "WALMART",
+            "SYN PACKAGED ITEM ITEM # 12345678 UPC: 000123456789 18 OZ F 4.50",
+            "SUBTOTAL 4.50",
+            "TAX 0.27",
+            "TOTAL 4.77",
+            "VISA **** 4827",
+            "01/02/2024 10:15:00",
+            "01/02/2024 10:21:00",
+        ]
+    )
+
+    document = extract_receipt_document(
+        _image_pdf(text), "application/pdf", LocalTesseractReader()
+    )
+
+    item = document["items"][0]
+    assert document["extraction"]["content_kind"] == "IMAGE_ONLY"
+    assert document["extraction"]["method"] == "OCR_FALLBACK"
+    assert item["store_product_id"] == "12345678"
+    assert item["upc"] != item["store_product_id"]
+    assert "ITEM # 12345678 UPC:" in item["raw_line_text"]
+    assert item["line_total"] is None
+    assert "INCOMPLETE_LINE_ITEMS:1" in document["extraction"]["issues"]
+    assert document["review_required"] is True
+
+
+def test_rm_025_image_only_order_sheet_segments_five_ten_and_fifteen_orders() -> None:
+    for order_count in (5, 10, 15):
+        text = _synthetic_order_sheet_text(order_count)
+        source = _image_pdf(text)
+        ocr_calls = 0
+
+        def fake_ocr(
+            _page: bytes, _page_number: int, selected_text: str = text
+        ) -> tuple[str, Decimal]:
+            nonlocal ocr_calls
+            ocr_calls += 1
+            return selected_text, Decimal("0.96")
+
+        document = extract_receipt_document(source, "application/pdf", fake_ocr)
+
+        assert ocr_calls == 1
+        assert document["extraction"]["content_kind"] == "IMAGE_ONLY"
+        assert document["review_required"] is False
+        orders = document["orders"]
+        assert len(orders) == order_count
+        assert [order["receipt"]["transaction_number"] for order in orders] == [
+            f"SYN-ORDER-{order_number:03d}" for order_number in range(1, order_count + 1)
+        ]
+        assert all(order["receipt"]["subtotal"] == "1.00" for order in orders)
+        assert all(order["receipt"]["tax"] == "0.06" for order in orders)
+        assert all(order["receipt"]["total"] == "1.06" for order in orders)
+        assert all(order["review_required"] is False for order in orders)
+
+
+def test_rm_025_mixed_pdf_segments_complete_ocr_order_sheet() -> None:
+    text = _synthetic_order_sheet_text(5)
+    source = _image_pdf(text)
+    pdf = pymupdf.open(stream=source, filetype="pdf")
+    pdf[0].insert_textbox(pymupdf.Rect(36, 36, 300, 100), "partial native header", fontsize=8)
+    mixed_source = pdf.tobytes()
+    pdf.close()
+
+    document = extract_receipt_document(
+        mixed_source,
+        "application/pdf",
+        lambda _page, _number: (text, Decimal("0.96")),
+    )
+
+    assert document["extraction"]["content_kind"] == "MIXED"
+    assert [order["receipt"]["transaction_number"] for order in document["orders"]] == [
+        f"SYN-ORDER-{number:03d}" for number in range(1, 6)
+    ]
+    assert all(order["review_required"] is False for order in document["orders"])
+
+
+def test_rm_025_mixed_pdf_retains_native_header_evidence_on_hold() -> None:
+    text = _synthetic_order_sheet_text(5)
+    pdf = pymupdf.open(stream=_image_pdf(text), filetype="pdf")
+    pdf[0].insert_textbox(
+        pymupdf.Rect(36, 36, 300, 100),
+        "Amazon\nOrder # SYN-NATIVE-CONFLICT\nOrder total: $9.99",
+        fontsize=8,
+    )
+    source = pdf.tobytes()
+    pdf.close()
+
+    document = extract_receipt_document(
+        source, "application/pdf", lambda _page, _number: (text, Decimal("0.96"))
+    )
+
+    assert len(document["orders"]) == 5
+    assert document["review_required"] is True
+    assert all(order["review_required"] is True for order in document["orders"])
+    assert document["native_candidate"]["receipt"]["transaction_number"] == (
+        "SYN-NATIVE-CONFLICT"
+    )
+    assert document["native_candidate"]["receipt"]["total"] == "9.99"
+    assert "SEGMENTED_NATIVE_OCR_REQUIRES_REVIEW" in document["extraction"]["issues"]
 
 
 @pytest.mark.skipif(

@@ -75,12 +75,12 @@ This clarifies ownership and schema timing without changing approved business be
 - Overview owns cross-cutting architecture; capability files own facts/contracts; roadmap defines stage outcomes; slice specs define acceptance; `03-current-slice.md` owns active task/evidence; manifest tracks tests, not authorization.
 - On conflict, stop and reconcile owning docs. Update only the owner and affected contracts; record changed tests.
 - Complete a stage only after real-entry-point profile, PG migrations, browser workflows, producer/consumer contracts, visible error/hold resolution, and manifest commands/results pass. Unit tests alone are insufficient.
-- Keep local-synthetic and production gates separate. Real-data approval never blocks synthetic work unless that test uses private data.
+- Keep local development and production gates separate. Private-data local tests and detailed local diagnostics are owner-authorized on 2026-10-02; keep inputs/outputs ignored/external and untracked. Redaction applies only before sharing/committing evidence. Production/provider approvals and reviewed ground truth for accuracy acceptance do not block exploratory local tests.
 
 ## Immediate Plan Reconciliation
 
 1. Queue: D-77 candidate/review → S13 synthetic restore/restart → S18-local. Keep the timed production RPO/RTO drill as a separate promotion gate; do not start MVP 2 before S18-local.
 2. After these gates, copy Capability 6 ledger and Capability 15 plan ownership into the selected MVP 2 slice.
 3. Keep Capability 9.3 as error writer/taxonomy owner; verify upload/OCR/import entry points in S18-local/`receipt-mvp`, not a parallel task.
-4. Resolve or preserve RM-022 production policy, RM-023 authority/evidence, F43/F44, private-corpus approval, and PDF scanning. Do not silently promote conditional behavior.
+4. Resolve or preserve RM-022 production policy, RM-023 authority/evidence, F43/F44, private-corpus production accuracy acceptance, and production PDF scanning. Local private-corpus use is already owner-authorized. Do not silently promote conditional behavior.
 5. Add actual commands/results to all 169 unique manifest cases; 117 currently lack commands.

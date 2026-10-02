@@ -124,6 +124,7 @@ class PersistedUploadProcessor:
             image_extractor = getattr(self._engine, "extract_image_candidates", None)
             if (
                 media_type == "application/pdf"
+                and not isinstance(document.get("orders"), list)
                 and document.get("review_required") is not True
                 and callable(image_extractor)
             ):
@@ -205,6 +206,70 @@ class PersistedUploadProcessor:
                         )
                     )
                     return "REVIEW"
+                order_documents = document.get("orders")
+                if isinstance(order_documents, list):
+                    if not order_documents:
+                        raise ValueError("Segmented receipt document contains no orders")
+                    upload.ocr_extraction_result = document
+                    source_review_required = False
+                    category_rules = load_category_rules(session)
+                    for order_document in order_documents:
+                        if (
+                            not isinstance(order_document, dict)
+                            or order_document.get("review_required") is True
+                        ):
+                            raise ValueError("Segmented receipt document is invalid")
+                        extracted = normalize_receipt(order_document, category_rules)
+                        existing_receipt = session.scalar(
+                            select(Receipt)
+                            .where(Receipt.receipt_id == extracted.receipt_id)
+                            .with_for_update()
+                        )
+                        if existing_receipt is not None:
+                            existing_source = session.scalar(
+                                select(ReceiptSource.id).where(
+                                    ReceiptSource.upload_pk == upload.upload_pk,
+                                    ReceiptSource.receipt_pk == existing_receipt.receipt_pk,
+                                )
+                            )
+                            if existing_source is None:
+                                persist_source_candidate(
+                                    session,
+                                    extracted,
+                                    upload,
+                                    existing_receipt,
+                                )
+                                source_review_required = True
+                            continue
+                        try:
+                            with session.begin_nested():
+                                persist_extracted_receipt(
+                                    session,
+                                    extracted,
+                                    upload,
+                                    increment_ocr_attempts=False,
+                                )
+                        except IntegrityError as error:
+                            if not _is_receipt_id_collision(error):
+                                raise
+                            duplicate = session.scalar(
+                                select(Receipt)
+                                .where(Receipt.receipt_id == extracted.receipt_id)
+                                .with_for_update()
+                            )
+                            if duplicate is None:
+                                raise
+                            persist_source_candidate(session, extracted, upload, duplicate)
+                            source_review_required = True
+
+                    upload.processing_lease_token = None
+                    upload.processing_lease_until = None
+                    if source_review_required:
+                        upload.processing_status = "REVIEW"
+                        upload.duplicate_status = "SOURCE_ASSOCIATION_REVIEW"
+                        return "REVIEW"
+                    upload.processing_status = "SUCCEEDED"
+                    return "SUCCEEDED"
                 extracted = normalize_receipt(document, load_category_rules(session))
                 try:
                     with session.begin_nested():

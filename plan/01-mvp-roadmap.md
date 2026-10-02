@@ -21,7 +21,7 @@ This roadmap sets release order; capability numbers are functional areas. Before
 - Multi-PDF receipt association without duplicate line counts; reconciliation to printed subtotal (RM-022).
 - Verification of local OCR against synthetic image-only and selectable-text PDFs (RM-023).
 - Real PDF imports only after an approved fail-closed scanner is installed and validated in the promoted candidate; mocked scanning is limited to synthetic development (D-09).
-- Isolated offline evaluation against private local `receipts/` directory after explicit authorization (RM-024).
+- Isolated offline evaluation against private local `receipts/` directory is owner-authorized on 2026-10-02 (RM-024). Detailed diagnostics may remain unredacted locally in ignored/external paths; shared evidence must be redacted. Missing expectations do not block exploratory runs, but prevent measured-accuracy claims for affected cases.
 - Local Tesseract/OpenCV with persistent files/PostgreSQL (normalized header/items, raw OCR JSONB, versioned canonical JSONB).
 - Four receipt-line dispositions (Personal, Ordinary Business Purchase, Recipe Ingredient, Capital Asset) with remembered defaults and pending routing intents.
 - Docker Compose local deployment with Postgres, Redis/Celery, persistent file storage, migrations, health check, and tested backup/restore.

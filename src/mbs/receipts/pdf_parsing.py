@@ -36,6 +36,14 @@ _ITEM_PRICE = re.compile(
 )
 _DATE_FORMATS = ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y")
 _WALMART_ITEM_ID = re.compile(r"\b(\d{8,14})\b")
+_WALMART_MERCHANT_ITEM_ID = re.compile(
+    r"\b(?:ITEM\s*(?:NO\.?|NUMBER|#)|SKU)\s*[:#]?\s*([A-Z0-9-]{3,32})\b",
+    re.IGNORECASE,
+)
+_WALMART_EXPLICIT_UPC = re.compile(
+    r"\b(?:UPC|EAN|GTIN)\s*[:#]?\s*(\d{8,14})\b",
+    re.IGNORECASE,
+)
 
 
 def parse_receipt_text(
@@ -123,6 +131,8 @@ def parse_receipt_text(
         "store_product_id",
         "quantity",
         "weight_lb",
+        "printed_size",
+        "upc",
         "unit_price",
         "line_total",
     ):
@@ -190,6 +200,20 @@ def parse_receipt_text(
         "extraction": {
             "content_kind": extraction.classification.content_kind.value,
             "method": extraction.method.value,
+            "field_candidates": {
+                field: {
+                    "native": receipt.get(field) if source_hint != "OCR" else None,
+                    "ocr": receipt.get(field) if source_hint == "OCR" else None,
+                    "selected": receipt.get(field),
+                    "selected_source": _field_source(field, extraction, source_hint),
+                    "confidence": str(confidences[field]),
+                }
+                for field in confidences
+            },
+            "item_candidates": {
+                "native": items if source_hint != "OCR" else [],
+                "ocr": items if source_hint == "OCR" else [],
+            },
             "field_confidence": {key: str(value) for key, value in confidences.items()},
             "field_source": {
                 field: _field_source(field, extraction, source_hint) for field in confidences
@@ -213,6 +237,67 @@ def parse_receipt_text(
     }
     field_sources = {field: _field_source(field, extraction, source_hint) for field in confidences}
     return ParsedReceiptText(document, confidences, field_sources, missing, tuple(issues))
+
+
+def _multi_order_document(
+    text: str,
+    extraction: PDFTextExtraction,
+    source_hint: str,
+) -> dict[str, Any] | None:
+    header_pattern = re.compile(
+        r"(?im)^\s*(?:Amazon|Walmart|BJ'S WHOLESALE CLUB|SAM'S CLUB)\s*$"
+    )
+    starts = [match.start() for match in header_pattern.finditer(text)]
+    if len(starts) < 2:
+        return None
+    segments = [
+        text[start : starts[index + 1] if index + 1 < len(starts) else len(text)].strip()
+        for index, start in enumerate(starts)
+    ]
+    parsed_orders = [parse_receipt_text(segment, extraction, source_hint) for segment in segments]
+    orders = [parsed.document for parsed in parsed_orders]
+    identities = [order["receipt"].get("transaction_number") for order in orders]
+    duplicate_identity = len(set(identity for identity in identities if identity)) != len(
+        [identity for identity in identities if identity]
+    )
+    if duplicate_identity:
+        for order in orders:
+            order["review_required"] = True
+            order["extraction"]["issues"] = [
+                *order["extraction"].get("issues", []),
+                "DUPLICATE_ORDER_IDENTITIES_IN_SOURCE",
+            ]
+    metadata = orders[0].get("metadata", {}) if orders else {}
+    issue_codes = sorted(
+        {
+            issue
+            for order in orders
+            for issue in order.get("extraction", {}).get("issues", [])
+            if isinstance(issue, str)
+        }
+    )
+    return {
+        "orders": orders,
+        "metadata": metadata,
+        "extraction": {
+            "content_kind": extraction.classification.content_kind.value,
+            "method": extraction.method.value,
+            "order_count": len(orders),
+            "issues": issue_codes,
+            "pages": [
+                {
+                    "page_number": page.page_number,
+                    "native_text_chars": len(page.native_text.strip()),
+                    "ocr_confidence": (
+                        str(page.ocr_confidence) if page.ocr_confidence is not None else None
+                    ),
+                    "selected_source": page.selected_source,
+                }
+                for page in extraction.pages
+            ],
+        },
+        "review_required": any(order.get("review_required") is True for order in orders),
+    }
 
 
 def extract_receipt_document(
@@ -239,12 +324,28 @@ def extract_receipt_document(
     native = parse_receipt_text(native_text, extraction, "NATIVE_TEXT")
     ocr_pages = [page for page in extraction.pages if page.ocr_text is not None]
     if not ocr_pages:
+        segmented = _multi_order_document(native_text, extraction, "NATIVE_TEXT")
+        if segmented is not None:
+            return segmented
         return native.document
 
     ocr_text = "\n".join(
         page.ocr_text if page.ocr_text is not None else page.native_text
         for page in extraction.pages
     )
+    segmented = _multi_order_document(ocr_text, extraction, "OCR")
+    if segmented is not None:
+        if any(
+            native.document["receipt"].get(field) is not None
+            for field in ("date", "time", "transaction_number", "subtotal", "tax", "total")
+        ):
+            segmented["native_candidate"] = native.document
+            segmented["review_required"] = True
+            segmented["extraction"]["issues"].append("SEGMENTED_NATIVE_OCR_REQUIRES_REVIEW")
+            for order in segmented["orders"]:
+                order["review_required"] = True
+                order["extraction"]["issues"].append("SEGMENTED_NATIVE_OCR_REQUIRES_REVIEW")
+        return segmented
     ocr = parse_receipt_text(ocr_text, extraction, "OCR")
     native_header = native.document["receipt"]
     ocr_header = ocr.document["receipt"]
@@ -339,6 +440,23 @@ def extract_receipt_document(
     document["extraction"] = {
         **document.get("extraction", {}),
         "method": extraction.method.value,
+        "field_candidates": {
+            field: {
+                "native": native_header.get(field),
+                "ocr": ocr_header.get(field),
+                "selected": merged_header.get(field),
+                "selected_source": header_sources.get(field),
+                "native_confidence": str(native.field_confidence.get(field, Decimal("0"))),
+                "ocr_confidence": str(ocr.field_confidence.get(field, Decimal("0"))),
+            }
+            for field in dict.fromkeys((*native_header, *ocr_header))
+        },
+        "item_candidates": {
+            "native": native_items,
+            "ocr": ocr_items,
+            "selected": merged_items,
+            "selected_sources": item_sources,
+        },
         "field_sources": {
             **header_sources,
             "items": item_sources,
@@ -438,17 +556,35 @@ def _parse_walmart_items(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     starts = [
         index
         for index, line in enumerate(body)
-        if _WALMART_ITEM_ID.search(line) and re.search(r"[A-Za-z]{3,}", line)
+        if (
+            _WALMART_ITEM_ID.search(line) or _WALMART_MERCHANT_ITEM_ID.search(line)
+        )
+        and re.search(r"[A-Za-z]{3,}", line)
     ]
     items: list[dict[str, Any]] = []
     issues: list[str] = []
     for occurrence, start in enumerate(starts):
         stop = starts[occurrence + 1] if occurrence + 1 < len(starts) else end
         block = "\n".join(body[start:stop])
-        identifier = _WALMART_ITEM_ID.search(body[start])
-        if identifier is None:
+        row = body[start]
+        identifier = _WALMART_ITEM_ID.search(row)
+        merchant_identifier = _WALMART_MERCHANT_ITEM_ID.search(row)
+        explicit_upc = _WALMART_EXPLICIT_UPC.search(row)
+        if identifier is None and merchant_identifier is None:
             continue
-        stripped = _WALMART_ITEM_ID.sub(" ", body[start])
+        if merchant_identifier is not None:
+            identifier_candidate = merchant_identifier[1]
+        elif identifier is not None:
+            identifier_candidate = identifier[1]
+        else:
+            continue
+        stripped = row
+        if merchant_identifier is not None:
+            stripped = _WALMART_MERCHANT_ITEM_ID.sub(" ", stripped, count=1)
+        if explicit_upc is not None:
+            stripped = _WALMART_EXPLICIT_UPC.sub(" ", stripped, count=1)
+        elif identifier is not None and merchant_identifier is None:
+            stripped = _WALMART_ITEM_ID.sub(" ", stripped, count=1)
         description = re.sub(r"\s+", " ", re.sub(r"\bF\b", " ", stripped))
         money = re.findall(r"\$?([\d,]+\.\d{2})\b", block)
         quantity = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:AT|@)\s*\d+(?:\.\d+)?\s+FOR\b", block, re.I)
@@ -459,9 +595,21 @@ def _parse_walmart_items(text: str) -> tuple[list[dict[str, Any]], list[str]]:
         items.append(
             {
                 "description": description.strip(" *-:") or None,
-                "store_product_id": None,
-                "upc": identifier[1] if len(identifier[1]) in {12, 13, 14} else None,
-                "identifier_candidate": identifier[1],
+                "store_product_id": (
+                    merchant_identifier[1] if merchant_identifier is not None else None
+                ),
+                "upc": (
+                    explicit_upc[1]
+                    if explicit_upc is not None
+                    else (
+                        identifier[1]
+                        if merchant_identifier is None
+                        and identifier is not None
+                        and len(identifier[1]) in {12, 13, 14}
+                        else None
+                    )
+                ),
+                "identifier_candidate": identifier_candidate,
                 "quantity": quantity[1] if quantity else None,
                 "weight_lb": weight[1] if weight else None,
                 "unit_price": None,
@@ -495,12 +643,17 @@ def _parse_amazon_items(text: str) -> list[dict[str, Any]]:
             block,
             re.I,
         )
+        upc_match = re.search(r"\b(?:UPC|EAN|GTIN)\s*:?\s*(\d{8,14})\b", block, re.I)
         quantity_match = re.search(r"\b(?:Qty|Quantity)\s*:?\s*(\d+)\b", block, re.I)
         return_match = re.search(r"\b(Return[^\n]*)", block, re.I)
 
         title_lines: list[str] = []
         for line in block_lines[1:]:
-            if re.search(r"\b(?:Size|Sold by|Supplied by|Return|ASIN|Item\s*#)\b", line, re.I):
+            if re.search(
+                r"\b(?:Size|Sold by|Supplied by|Return|ASIN|Item\s*#|UPC|EAN|GTIN)\b",
+                line,
+                re.I,
+            ):
                 break
             if _MONEY.search(line) or _is_amazon_metadata_line(line):
                 continue
@@ -514,7 +667,7 @@ def _parse_amazon_items(text: str) -> list[dict[str, Any]]:
             {
                 "description": description,
                 "store_product_id": item_number_match[1] if item_number_match else None,
-                "upc": None,
+                "upc": upc_match[1] if upc_match else None,
                 "quantity": quantity,
                 "weight_lb": None,
                 "unit_price": None,

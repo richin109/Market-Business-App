@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -14,7 +15,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,6 +23,7 @@ import mbs.main as main_module
 from mbs.auth import Role, create_session, create_user
 from mbs.celery_app import celery_app
 from mbs.db import get_session
+from mbs.items import confirm_store_item_mapping
 from mbs.main import app
 from mbs.media_assets import MediaAssetService
 from mbs.models import (
@@ -39,7 +41,9 @@ from mbs.models import (
     ReceiptUpload,
     Setting,
 )
+from mbs.receipts.approval import DispositionSubtype, approve_receipt_item
 from mbs.receipts.duplicates import PillowPerceptualHasher
+from mbs.receipts.ocr import BusinessDisposition
 from mbs.receipts.pdf_extraction import EmbeddedPDFImage
 from mbs.receipts.sources import SourceDecision, decide_receipt_source
 from mbs.receipts.storage import LocalProtectedFileStore
@@ -69,6 +73,95 @@ def _pdf_with_label(label: str) -> bytes:
     result = cast(bytes, document.tobytes())
     document.close()
     return result
+
+
+def _multi_order_pdf(order_count: int) -> bytes:
+    blocks = []
+    for order_number in range(1, order_count + 1):
+        blocks.append(
+            "\n".join(
+                [
+                    "Amazon",
+                    "Order placed October 2, 2026",
+                    f"Order # SYN-ORDER-{order_number:03d}",
+                    f"Time: 09:{order_number:02d} AM",
+                    "Payment method Visa",
+                    "Item (1) Subtotal: $1.00",
+                    "Estimated tax: $0.06",
+                    "Order total: $1.06",
+                    "Delivered October 2, 2026",
+                    f"Synthetic item {order_number:03d}",
+                    "Quantity: 1",
+                    "Size: 1 CT",
+                    f"ASIN: SYN-ITEM-{order_number:03d}",
+                    f"UPC: {order_number:012d}",
+                    "$1.00",
+                ]
+            )
+        )
+    document = pymupdf.open()
+    page = document.new_page(width=612, height=4000)
+    page.insert_textbox(pymupdf.Rect(30, 30, 582, 3970), "\n".join(blocks), fontsize=9)
+    source = cast(bytes, document.tobytes())
+    document.close()
+    return source
+
+
+def _multi_order_image(order_count: int) -> bytes:
+    font = ImageFont.load_default(size=22)
+    image = Image.new("RGB", (1200, max(600, order_count * 400)), "white")
+    draw = ImageDraw.Draw(image)
+    text = []
+    for order_number in range(1, order_count + 1):
+        text.extend(
+            [
+                "Amazon",
+                "Order placed October 2, 2026",
+                f"Order # SYN-ORDER-{order_number:03d}",
+                f"Time: 09:{order_number:02d} AM",
+                "Payment method Visa",
+                "Item (1) Subtotal: $1.00",
+                "Estimated tax: $0.06",
+                "Order total: $1.06",
+                "Delivered October 2, 2026",
+                f"Synthetic item {order_number:03d}",
+                "Quantity: 1",
+                "Size: 1 CT",
+                f"ASIN: SYN-ITEM-{order_number:03d}",
+                f"UPC: {order_number:012d}",
+                "$1.00",
+                "",
+            ]
+        )
+    for line_number, line in enumerate(text):
+        draw.text((40, 30 + line_number * 24), line, fill="black", font=font)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _multi_order_text(order_count: int) -> str:
+    return "\n".join(
+        line
+        for order_number in range(1, order_count + 1)
+        for line in (
+            "Amazon",
+            "Order placed October 2, 2026",
+            f"Order # SYN-ORDER-{order_number:03d}",
+            f"Time: 09:{order_number:02d} AM",
+            "Payment method Visa",
+            "Item (1) Subtotal: $1.00",
+            "Estimated tax: $0.06",
+            "Order total: $1.06",
+            "Delivered October 2, 2026",
+            f"Synthetic item {order_number:03d}",
+            "Quantity: 1",
+            "Size: 1 CT",
+            f"ASIN: SYN-ITEM-{order_number:03d}",
+            f"UPC: {order_number:012d}",
+            "$1.00",
+        )
+    )
 
 
 def _near_match_png(offset: int = 0) -> bytes:
@@ -215,6 +308,252 @@ def test_real_app_stages_upload_before_dispatch_and_never_runs_ocr(
         assert event is not None and event.dispatched_at is not None
     assert (storage_path / queued.json()["file_key"]).is_file()
     engine.dispose()
+
+
+def test_directory_batch_upload_replay_is_per_file_idempotent_and_reports_partial_failure(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    engine, session_factory = _database(tmp_path / "directory-batch-upload.db")
+    storage_path = tmp_path / "directory-batch-files"
+    monkeypatch.setenv("RECEIPT_STORAGE_PATH", str(storage_path))
+    dispatch_count = 0
+    with session_factory.begin() as session:
+        manager = create_user(session, "directory-batch-manager", "manager password", Role.MANAGER)
+        token, csrf = create_session(session, manager)
+        viewer = create_user(session, "directory-batch-viewer", "viewer password", Role.VIEWER)
+        viewer_token, viewer_csrf = create_session(session, viewer)
+
+    def override_session() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
+
+    def dispatch_after_commit() -> None:
+        nonlocal dispatch_count
+        dispatch_count += 1
+
+    app.dependency_overrides[get_session] = override_session
+    monkeypatch.setattr(main_module, "SessionLocal", session_factory)
+    monkeypatch.setattr("mbs.receipts.tasks.SessionLocal", session_factory)
+    monkeypatch.setattr(receipt_routes, "_request_outbox_dispatch", dispatch_after_commit)
+    try:
+        with TestClient(app) as client:
+            headers = {
+                "Cookie": f"mbs_session={token}",
+                "X-CSRF-Token": csrf,
+            }
+            missing_csrf = client.post(
+                "/api/v1/receipts/upload-batch",
+                files=[("files", ("nested/receipt.png", _near_match_png(), "image/png"))],
+                headers={"Cookie": f"mbs_session={token}"},
+            )
+            viewer_response = client.post(
+                "/api/v1/receipts/upload-batch",
+                files=[("files", ("nested/receipt.png", _near_match_png(), "image/png"))],
+                headers={
+                    "Cookie": f"mbs_session={viewer_token}",
+                    "X-CSRF-Token": viewer_csrf,
+                },
+            )
+            first = client.post(
+                "/api/v1/receipts/upload-batch",
+                files=[
+                    ("files", ("first/receipt.png", _near_match_png(), "image/png")),
+                    ("files", ("second/unsupported.txt", b"synthetic text", "text/plain")),
+                ],
+                headers=headers,
+            )
+            replay = client.post(
+                "/api/v1/receipts/upload-batch",
+                files=[
+                    ("files", ("first/receipt.png", _near_match_png(), "image/png")),
+                    ("files", ("second/unsupported.txt", b"synthetic text", "text/plain")),
+                ],
+                headers=headers,
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert missing_csrf.status_code == 403
+    assert viewer_response.status_code == 403
+    assert first.status_code == 200
+    assert first.json()["file_count"] == 2
+    assert [result["status"] for result in first.json()["files"]] == ["QUEUED", "INVALID"]
+    assert replay.status_code == 200
+    assert [result["status"] for result in replay.json()["files"]] == [
+        "EXACT_DUPLICATE",
+        "INVALID",
+    ]
+    assert replay.json()["files"][0]["upload_pk"] == first.json()["files"][0]["upload_pk"]
+    assert replay.json()["files"][0]["idempotent"] is True
+    assert dispatch_count == 1
+    with session_factory() as session:
+        assert session.scalar(select(func.count(ReceiptUpload.upload_pk))) == 1
+        assert session.scalar(select(func.count(ReceiptOutboxEvent.id))) == 1
+        assert session.scalar(select(func.count(Receipt.receipt_pk))) == 0
+    engine.dispose()
+
+
+def test_worker_processes_changed_single_image_versions_without_duplicate_receipts(
+    tmp_path: Path,
+) -> None:
+    engine, session_factory = _database(tmp_path / "changed-image-order-versions.db")
+    file_store = LocalProtectedFileStore(tmp_path / "changed-image-order-files")
+    with session_factory.begin() as session:
+        manager = create_user(session, "changed-image-manager", "synthetic password", Role.MANAGER)
+        manager_id = manager.id
+
+    order_text_by_hash: dict[str, str] = {}
+
+    def fake_image_ocr(source: bytes, _page_number: int) -> tuple[str, Decimal]:
+        return order_text_by_hash[hashlib.sha256(source).hexdigest()], Decimal("0.96")
+
+    processor = PersistedUploadProcessor(
+        session_factory,
+        file_store,
+        LocalReceiptOCREngine(fake_image_ocr),
+    )
+    prior_receipt_pks: dict[str, str] = {}
+    prior_line_ids: dict[str, int] = {}
+    processed_uploads: list[tuple[str, str]] = []
+    approved_identity: tuple[int, int] | None = None
+    try:
+        for order_count in (5, 10, 15):
+            source = _multi_order_image(order_count)
+            source_sha256 = hashlib.sha256(source).hexdigest()
+            file_key = file_store.save(source_sha256, source, "image/png")
+            order_text_by_hash[source_sha256] = _multi_order_text(order_count)
+            with session_factory.begin() as session:
+                upload = ReceiptUpload(
+                    source_sha256=source_sha256,
+                    file_key=file_key,
+                    media_type="image/png",
+                    size_bytes=len(source),
+                    uploaded_by=manager_id,
+                    processing_status="QUEUED",
+                    scan_status="NOT_SCANNED",
+                )
+                session.add(upload)
+                session.flush()
+                upload_pk = upload.upload_pk
+
+            result = processor.process(upload_pk)
+            assert result == ("SUCCEEDED" if order_count == 5 else "REVIEW")
+            with session_factory.begin() as session:
+                receipts = session.scalars(
+                    select(Receipt).where(Receipt.transaction_number.like("SYN-ORDER-%"))
+                ).all()
+                actual_by_transaction = {
+                    receipt.transaction_number: receipt.receipt_pk for receipt in receipts
+                }
+                assert len(actual_by_transaction) == order_count
+                expected_transactions = {
+                    f"SYN-ORDER-{number:03d}" for number in range(1, order_count + 1)
+                }
+                assert set(actual_by_transaction) == expected_transactions
+                for transaction_number, receipt_pk in prior_receipt_pks.items():
+                    assert actual_by_transaction[transaction_number] == receipt_pk
+                    line_id = session.scalar(
+                        select(ReceiptItem.id).where(ReceiptItem.receipt_pk == receipt_pk)
+                    )
+                    assert line_id == prior_line_ids[transaction_number]
+
+                source_rows = session.scalars(
+                    select(ReceiptSource).join(
+                        Receipt, Receipt.receipt_pk == ReceiptSource.receipt_pk
+                    ).where(Receipt.transaction_number.like("SYN-ORDER-%"))
+                ).all()
+                expected_sources = order_count + sum(range(5, order_count, 5))
+                assert len(source_rows) == expected_sources
+                expected_pending = sum(range(5, order_count, 5))
+                assert sum(source.association_kind == "PENDING" for source in source_rows) == (
+                    expected_pending
+                )
+                if order_count == 5:
+                    first_line = session.scalar(
+                        select(ReceiptItem).where(
+                            ReceiptItem.receipt_pk == actual_by_transaction["SYN-ORDER-001"]
+                        )
+                    )
+                    assert first_line is not None
+                    assert first_line.store_item_id is not None and first_line.item_id is not None
+                    confirm_store_item_mapping(
+                        session,
+                        first_line.store_item_id,
+                        first_line.item_id,
+                        manager_id,
+                        effective_from=date(2026, 10, 3),
+                    )
+                    first_line.business_disposition = "ORDINARY_BUSINESS_PURCHASE"
+                    first_line.disposition_subtype = "DIRECT_EXPENSE"
+                    session.flush()
+                    approval = approve_receipt_item(
+                        session,
+                        first_line.id,
+                        manager_id,
+                        BusinessDisposition.ORDINARY_BUSINESS_PURCHASE,
+                        "synthetic-version-approval",
+                        DispositionSubtype.DIRECT_EXPENSE,
+                    ).approval
+                    route_id = session.scalar(
+                        select(ReceiptRoutingRecord.id).where(
+                            ReceiptRoutingRecord.receipt_item_id == first_line.id
+                        )
+                    )
+                    assert route_id is not None
+                    approved_identity = approval.id, route_id
+                assert session.scalar(select(func.count(ReceiptLineApproval.id))) == 1
+                assert session.scalar(select(func.count(ReceiptRoutingRecord.id))) == 1
+                assert approved_identity == (
+                    session.scalar(select(ReceiptLineApproval.id)),
+                    session.scalar(select(ReceiptRoutingRecord.id)),
+                )
+                current_transactions = [
+                    f"SYN-ORDER-{number:03d}"
+                    for number in range(1, order_count + 1)
+                    if number > order_count - 5
+                ]
+                for transaction_number in current_transactions:
+                    receipt_pk = actual_by_transaction[transaction_number]
+                    prior_receipt_pks[transaction_number] = receipt_pk
+                    persisted_line_id = session.scalar(
+                        select(ReceiptItem.id).where(ReceiptItem.receipt_pk == receipt_pk)
+                    )
+                    assert persisted_line_id is not None
+                    prior_line_ids[transaction_number] = persisted_line_id
+
+            assert processor.process(upload_pk) == result
+            processed_uploads.append((upload_pk, result))
+            for prior_upload_pk, prior_result in processed_uploads:
+                assert processor.process(prior_upload_pk) == prior_result
+            with session_factory() as session:
+                assert session.scalar(
+                    select(func.count(Receipt.receipt_pk)).where(
+                        Receipt.transaction_number.like("SYN-ORDER-%")
+                    )
+                ) == order_count
+                assert session.scalar(
+                    select(func.count(ReceiptSource.id)).join(
+                        Receipt, Receipt.receipt_pk == ReceiptSource.receipt_pk
+                    ).where(Receipt.transaction_number.like("SYN-ORDER-%"))
+                ) == (order_count + sum(range(5, order_count, 5)))
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.skipif(
+    shutil.which("tesseract") is None,
+    reason="Local Tesseract executable is unavailable",
+)
+def test_rm_025_real_tesseract_segments_generated_five_order_image() -> None:
+    document = LocalReceiptOCREngine().extract(_multi_order_image(5), "image/png")
+
+    assert document["extraction"]["content_kind"] == "IMAGE_ONLY"
+    assert len(document["orders"]) == 5
+    transaction_numbers = [
+        order["receipt"]["transaction_number"] for order in document["orders"]
+    ]
+    assert transaction_numbers == [f"SYN-ORDER-{number:03d}" for number in range(1, 6)]
+    assert all(order["review_required"] is True or order["items"] for order in document["orders"])
 
 
 def test_worker_persists_incomplete_image_pdf_extraction_for_review(tmp_path: Path) -> None:

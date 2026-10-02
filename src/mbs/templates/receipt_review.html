@@ -34,6 +34,11 @@
     .correction-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
     .correction-fields input { min-width: 0; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
     .correction-form textarea { min-height: 3rem; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    .extraction-evidence { margin: .8rem 0; padding: .55rem; border: 1px solid #d3ddd5; }
+    .extraction-evidence summary { cursor: pointer; font-weight: 600; }
+    .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+    .evidence-grid dd { margin: .15rem 0 .5rem; overflow-wrap: anywhere; }
+    .evidence-raw { white-space: pre-wrap; overflow-wrap: anywhere; }
     .line-head { display: flex; justify-content: space-between; gap: .8rem; align-items: start; }
     .line-source, .line-meta { color: #53625a; font-size: .92rem; }
     .line-meta { display: flex; gap: .5rem 1rem; flex-wrap: wrap; margin: .55rem 0; }
@@ -72,6 +77,20 @@
     <p class="receipt-meta">{{ receipt.store }} · {{ receipt.receipt_date }} · {{ receipt.receipt_id }}</p>
     {% if total_mismatch %}<p class="review-warning" role="status">Line totals do not reconcile to the item subtotal; approval is blocked.</p>{% endif %}
     {% if attention_fields %}<p class="review-warning" role="status">Review highlighted extracted fields: {{ attention_fields | join(", ") }}</p>{% endif %}
+    <details class="extraction-evidence" data-extraction-evidence>
+      <summary>Header extraction evidence</summary>
+      {% if extraction_evidence.issues %}<p class="review-warning">Review flags: {{ extraction_evidence.issues | join(", ") }}</p>{% endif %}
+      {% if extraction_evidence.references %}<p>Printed references: {{ extraction_evidence.references | tojson }}</p>{% endif %}
+      <p>Visible payment suffix: {{ extraction_evidence.card_last_four or "Not visible" }}</p>
+      <dl class="evidence-grid">
+        {% for field, candidate in extraction_evidence.field_candidates.items() %}
+        <div>
+          <dt>{{ field.replace("_", " ") | title }}</dt>
+          <dd>Native: {{ candidate.native | tojson }} · OCR: {{ candidate.ocr | tojson }} · Selected: {{ candidate.selected | tojson }} ({{ candidate.selected_source or "unresolved" }})</dd>
+        </div>
+        {% endfor %}
+      </dl>
+    </details>
     {% if not corrections_locked %}
     <form class="correction-form" data-correction-form data-receipt-id="{{ receipt.receipt_pk }}">
       <h2>Correct receipt header</h2>
@@ -208,6 +227,18 @@
           <strong class="status">Excluded · {{ line.exclusion_reason }}</strong>
           {% endif %}
         </div>
+        <details class="extraction-evidence" data-line-evidence>
+          <summary>Line extraction evidence</summary>
+          <dl class="evidence-grid">
+            <div><dt>Merchant item number</dt><dd>{{ line.extraction_evidence.merchant_item_number or "Not identified" }}</dd></div>
+            <div><dt>UPC</dt><dd>{{ line.extraction_evidence.upc or "Not identified" }}</dd></div>
+            <div><dt>Printed size</dt><dd>{{ line.extraction_evidence.printed_size or "Not identified" }}</dd></div>
+            <div><dt>Quantity / weight (lb)</dt><dd>{{ line.extraction_evidence.quantity or "Not identified" }} / {{ line.extraction_evidence.weight_lb or "Not identified" }}</dd></div>
+          </dl>
+          {% if line.extraction_evidence.native_candidate %}<p>Native candidate: {{ line.extraction_evidence.native_candidate | tojson }}</p>{% endif %}
+          {% if line.extraction_evidence.ocr_candidate %}<p>OCR candidate: {{ line.extraction_evidence.ocr_candidate | tojson }}</p>{% endif %}
+          {% if line.extraction_evidence.raw_line_text %}<pre class="evidence-raw">{{ line.extraction_evidence.raw_line_text }}</pre>{% endif %}
+        </details>
         {% if not corrections_locked and not line.is_excluded %}
         <form class="correction-form" data-correction-form data-receipt-id="{{ receipt.receipt_pk }}" data-item-index="{{ loop.index0 }}">
           <h2>Correct line</h2>

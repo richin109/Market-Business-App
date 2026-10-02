@@ -13,8 +13,9 @@ These instructions apply to any coding agent working in this repository, regardl
 - Add or update focused tests for every behavior change.
 - Run the narrowest relevant test first, then the repository's required lint, type-check, and full test commands before declaring completion.
 - Do not claim a command passed unless it was actually run. Report unavailable tools, skipped checks, warnings, and unrelated failures.
-- Use synthetic data, mocks, and provider sandboxes. Never commit secrets, tokens, customer data, production exports, or local environment files.
-- Model synthetic fixtures on reality: when a fixture stands in for something the business actually receives, consult the real examples in the local untracked `receipts/` directory for layout, formats, and edge cases, then reproduce that shape with invented values. Never copy a real value, filename, image, or expected-result entry into the repository, a test, CI, a log, or a chat message.
+- Private data, including real receipt images and PDFs, is allowed for local development and local tests. Keep private inputs, extracted data, expected results, and generated reports in gitignored locations such as `receipts/`, `data/receipts/`, or `.local/`. Add ignore rules before introducing private files elsewhere and verify that none are already tracked. Never commit or push private data, secrets, tokens, production exports, or local environment files to GitLab or another remote.
+- Run relevant local private-data tests when their inputs are available; being gitignored is not a reason to skip them. Keep committed tests and fixtures synthetic and runnable without private files; report local corpus checks separately. Do not expose private contents in shared logs, CI artifacts, or chat, or upload them to external providers without explicit approval.
+- Model synthetic fixtures on reality: when a committed fixture stands in for something the business actually receives, consult the real examples in the local untracked `receipts/` directory for layout, formats, and edge cases, then reproduce that shape with invented values. Never copy real values, filenames, images, or expected-result entries into committed fixtures.
 - Keep public behavior and established architecture stable unless the active plan step requires a change.
 
 ## Review Gate (D-00)

@@ -38,6 +38,8 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 /receipts/
+/data/receipts/
+/receipts;C/
 # Specific reference PDFs, ignored by filename wherever they appear.
 **/114-0370649-6037055.pdf
 **/114-0705220-5254623.pdf
