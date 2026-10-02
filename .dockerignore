@@ -5,5 +5,12 @@
 .pytest_cache
 .mypy_cache
 .ruff_cache
-plan
 support
+!support/__init__.py
+!support/review_receipts.py
+!support/receipt_review.html
+receipts
+receipts;C
+data
+NUL
+.vscode

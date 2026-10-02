@@ -38,6 +38,30 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 /receipts/
+# Specific reference PDFs, ignored by filename wherever they appear.
+**/114-0370649-6037055.pdf
+**/114-0705220-5254623.pdf
+**/114-0819633-3438650.pdf
+**/114-1337348-9021019.pdf
+**/114-2652625-0186637.pdf
+**/114-3994849-1189823.pdf
+**/114-4675238-8265813.pdf
+**/114-6400961-8855403.pdf
+**/114-9887521-1052212.pdf
+**/Account Information _ BJ's Wholesale Club.pdf
+**/Account Information _ BJ's Wholesale Club1.pdf
+**/Account Information _ BJ's Wholesale Club-1.pdf
+**/Account Information _ BJ's Wholesale Club2.pdf
+**/Account Information _ BJ's Wholesale Club3.pdf
+**/Account Information _ BJ's Wholesale Club5.pdf
+**/Account Information _ BJ's Wholesale Club6.pdf
+**/Account Information _ BJ's Wholesale Club-missing--items.pdf
+**/Account Information _ BJ's Wholesale Club-not-business.pdf
+**/Order details - Walmart.com.pdf
+**/Order details - Walmart.com1.pdf
+**/Order details - Walmart.com2.pdf
+**/Order details - Walmart.com3.pdf
+.local/
 htmlcov/
 .tox/
 .nox/

@@ -4,6 +4,8 @@ This roadmap defines deployable release order. Capability numbers identify funct
 
 ## MVP 1 — Receipt Capture, Review & Storage
 
+**Database rule for MVP 1-8 (D-77):** PostgreSQL is the sole runtime and database-test engine. Every stage follows the [shared PostgreSQL contract](00-overview.md#postgresql-contract-all-stages) and [stage-specific acceptance matrix](mvp-slice-specifications.md#postgresql-stage-acceptance). SQLAlchemy/Alembic and core services remain generic; changing a connection URL alone does not certify another backend.
+
 **Goal:** Deploy a receipt application that extracts each accepted receipt once, lets the user correct it, and saves all resulting information for reuse.
 
 **In scope**

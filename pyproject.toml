@@ -6,13 +6,17 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14",
     "argon2-cffi>=23.1",
-    "fastapi>=0.115",
+    "fastapi>=0.142.1",
     "ImageHash>=4.3",
+    "Jinja2>=3.1",
     "Pillow>=10.0",
     "uvicorn[standard]>=0.30",
     "celery[redis]>=5.4",
     "psycopg[binary]>=3.2",
     "sqlalchemy>=2.0",
+    "pymupdf>=1.28.2",
+    "pytesseract>=0.3.13",
+    "opencv-python-headless>=5.0.0.93",
 ]
 
 [dependency-groups]
@@ -21,6 +25,8 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
+    "httpx2>=2.13.1",
+    "pytest-playwright>=0.7",
 ]
 
 [build-system]
@@ -52,5 +58,20 @@ strict = true
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*"]
+module = ["celery", "celery.*", "pytesseract", "pytesseract.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["mbs.receipts.pdf_extraction"]
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = [
+    "tests.test_receipt_pdf_extraction",
+    "test_receipt_pdf_extraction",
+    "tests.test_receipt_pipeline_wiring",
+    "test_receipt_pipeline_wiring",
+    "tests.test_receipt_review_ui",
+    "test_receipt_review_ui",
+]
+disallow_untyped_calls = false

@@ -1,15 +1,35 @@
 x-app: &app
-  build: .
+  build:
+    context: .
+    target: runtime
   env_file:
     - path: .env
       required: false
   environment:
-    DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mbs:change-me@postgres:5432/mbs}
+    DATABASE_URL: ${DATABASE_URL:-}
+    DATABASE_HOST: postgres
+    DATABASE_PORT: "5432"
+    DATABASE_NAME: ${POSTGRES_DB:-mbs}
+    DATABASE_USER: ${POSTGRES_USER:-mbs}
+    DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    RECEIPT_STORAGE_PATH: ${RECEIPT_STORAGE_PATH:-/var/lib/mbs/receipts}
+    RECEIPT_MAX_FILE_BYTES: ${RECEIPT_MAX_FILE_BYTES:-10000000}
   depends_on:
     postgres:
       condition: service_healthy
     redis:
+      condition: service_healthy
+
+x-test: &test
+  build:
+    context: .
+    target: test
+  environment:
+    DATABASE_URL: postgresql+psycopg://mbs_test:mbs_test_only@postgres-migration-test:5432/mbs_migration_test
+    MBS_TEST_DATABASE_URL: postgresql+psycopg://mbs_test:mbs_test_only@postgres-migration-test:5432/mbs_migration_test
+  depends_on:
+    postgres-migration-test:
       condition: service_healthy
 
 services:
@@ -20,25 +40,35 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - ./src:/app/src
-      - ./tests:/app/tests
-      - ./pyproject.toml:/app/pyproject.toml:ro
+      - receiptdata:/var/lib/mbs/receipts
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   celery-worker:
     <<: *app
     command: ["celery", "-A", "mbs.celery_app", "worker", "--loglevel=info"]
+    volumes:
+      - receiptdata:/var/lib/mbs/receipts
 
   celery-beat:
     <<: *app
     command: ["celery", "-A", "mbs.celery_app", "beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18.6-trixie
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mbs}
       POSTGRES_USER: ${POSTGRES_USER:-mbs}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${MBS_POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -46,12 +76,70 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:8.10.2-trixie
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  postgres-migration-test:
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_DB: mbs_migration_test
+      POSTGRES_USER: mbs_test
+      POSTGRES_PASSWORD: mbs_test_only
+    tmpfs:
+      - /var/lib/postgresql
+    ports:
+      - "127.0.0.1:${MBS_TEST_POSTGRES_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  test-migrations-postgres:
+    <<: *test
+    command: ["pytest", "tests/test_migrations_postgres.py", "-q"]
+
+  test:
+    <<: *test
+    image: ${COMPOSE_PROJECT_NAME:-market-business-app}-test
+    command: ["pytest", "-q", "--tb=short"]
+
+  test-dev:
+    <<: *test
+    image: ${COMPOSE_PROJECT_NAME:-market-business-app}-test
+    profiles: ["dev"]
+    pull_policy: never
+    entrypoint: ["sh", "/app/support/run_dev_tests.sh"]
+    command: ["pytest", "-q", "--tb=short"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://mbs_test:mbs_test_only@postgres-migration-test:5432/mbs_migration_test
+      MBS_TEST_DATABASE_URL: postgresql+psycopg://mbs_test:mbs_test_only@postgres-migration-test:5432/mbs_migration_test
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTEST_ADDOPTS: "-o cache_dir=/tmp/mbs-test-cache/pytest --basetemp=/tmp/mbs-test-work/pytest --output=/tmp/mbs-test-work/playwright"
+      RUFF_CACHE_DIR: /tmp/mbs-test-cache/ruff
+      MYPY_CACHE_DIR: /tmp/mbs-test-cache/mypy
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./plan:/app/plan:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./uv.lock:/app/uv.lock:ro
+      - ./Dockerfile:/app/Dockerfile:ro
+      - ./support/__init__.py:/app/support/__init__.py:ro
+      - ./support/review_receipts.py:/app/support/review_receipts.py:ro
+      - ./support/receipt_review.html:/app/support/receipt_review.html:ro
+      - ./support/run_dev_tests.sh:/app/support/run_dev_tests.sh:ro
+      - test-dev-cache:/tmp/mbs-test-cache
+    tmpfs:
+      - /tmp/mbs-test-work:uid=1000,gid=1000,mode=0700
+
 volumes:
   pgdata:
+  receiptdata:
+  test-dev-cache:

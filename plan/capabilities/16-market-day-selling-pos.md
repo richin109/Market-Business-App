@@ -1,5 +1,8 @@
 # Capability 16: Market-Day Selling & POS Operations
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test concurrent session open/close/allocation, parent locks, declarative made quantities, UTC/DST close boundaries, one-time transfers, and worker/database restart without a second sales or stock ledger.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `src/mbs/market_day/`. Owns the operational market-session workflow at a market stall. Actual sales are captured in the Square app/POS outside MBS; this capability uses Capability 14 for imported Square sales, Capability 4 for products/prices, Capability 5 for the market visit and for the shared production-event service it calls but never defines (D-60), the single MVP 2 `StockBalanceReader` for availability (D-59), and Capability 9 for settings and permissions. Capability 6 later replaces that reader's implementation behind the same interface; no capability may introduce a parallel availability, production, or sales ledger.
@@ -50,7 +53,7 @@ Bounded context: `src/mbs/market_day/`. Owns the operational market-session work
 - [ ] Feature complete
 - [ ] Provide a pre-open checklist for Square device/payment readiness, products, packaging, labels/signage, samples, permits/documents, and emergency supplies.
 - [ ] Provide a printable or display-mode price list for the selected market session, including product name, unit, price, availability, and approved customer-facing descriptions.
-- [ ] Include each product's approved primary image, or the default placeholder, in the printable and display-mode lists. No internal cost, margin, supplier, or store data may appear in any customer-facing view, and image provenance metadata is not exposed to customers. Cover IM-005 in [the test-case manifest](../test-case-manifest.csv); planned focused command once implemented: `uv run --frozen pytest tests/test_market_day_product_display.py -q`.
+- [ ] Include each product's approved primary image, or the default placeholder, in the printable and display-mode lists. No internal cost, margin, supplier, or store data may appear in any customer-facing view, and image provenance metadata is not exposed to customers. Cover IM-005 in [the test-case manifest](../test-case-manifest.csv); planned focused command once implemented: `docker compose run --rm test pytest tests/test_market_day_product_display.py -q`.
 - [ ] Products may expose approved ingredient, allergen, storage, best-by, batch/production-date, and preparation information when applicable; do not expose internal margin or cost data.
 - [ ] Record market-day observations such as weather, foot traffic, promotion, competitor notes, and operational incidents separately from financial facts.
 - [ ] Provide an end-of-day packing and equipment checklist, including damaged, returned, donated, or discarded stock as explicit session-allocation disposition events. Capability 6 later maps these events to the full inventory movement model.

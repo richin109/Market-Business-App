@@ -1,5 +1,8 @@
 # Capability 5: Markets & Weekly Operations
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test full-date/open-ended periods and overlap races, stable visit identity, exact route allocation, and declarative production/expense corrections in one transaction with independent sessions.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `src/mbs/markets/` (blueprint §3.1 #3, Modules 6–8). Owns the market directory/cost history, dated visits, route costs, weekly production, expenses, and asset records. It also owns the **shared production-event service** from MVP 3 under D-60: that service is the only component that creates, corrects, or adjusts a `Made N` event and its finished-stock, recipe-input, supply, and waste-remainder movements. Capability 16's market-day screen, Capability 15's prep confirmation, and this capability's own weekly entry all call it; none of them defines a second production record or correction history. Market shopping lists and prep confirmation belong to Capability 15.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,7 +20,7 @@ class CategoryRuleSpec:
 
 _CATEGORY_KEYWORDS = {
     "Beverages": ("coffee", "juice", "soda", "water", "tea"),
-    "Produce": ("apple", "banana", "lettuce", "tomato", "onion", "produce"),
+    "Produce": ("apple", "banana", "celery", "lettuce", "tomato", "onion", "produce"),
     "Household": ("cleaner", "paper towel", "trash bag", "detergent"),
     "Frozen Meals": ("frozen", "ice cream"),
     "Lawn & Garden": ("soil", "seed", "fertilizer", "garden"),
@@ -41,9 +43,14 @@ def classify_description(
 ) -> str:
     normalized = description.casefold()
     for rule in sorted((rule for rule in rules if rule.enabled), key=lambda rule: rule.priority):
-        if rule.keyword.casefold() in normalized:
+        if _keyword_pattern(rule.keyword.casefold()).search(normalized):
             return rule.category
     return "Other"
+
+
+@lru_cache(maxsize=512)
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<!\w){re.escape(keyword)}(?!\w)")
 
 
 def load_category_rules(session: Session) -> tuple[CategoryRuleSpec, ...]:

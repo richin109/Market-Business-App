@@ -14,6 +14,7 @@ class RuleMatchKind(StrEnum):
 
 @dataclass(frozen=True)
 class RememberedItemRule:
+    store_item_id: str
     vendor: str
     description: str
     disposition: BusinessDisposition
@@ -22,8 +23,9 @@ class RememberedItemRule:
 
 @dataclass(frozen=True)
 class RuleMatch:
-    rule: RememberedItemRule
+    rule: RememberedItemRule | None
     kind: RuleMatchKind
+    candidates: tuple[RememberedItemRule, ...]
 
 
 def find_item_rule(
@@ -31,12 +33,26 @@ def find_item_rule(
     vendor: str,
     description: str,
     upc: str | None = None,
+    store_item_id: str | None = None,
 ) -> RuleMatch | None:
+    if store_item_id is not None:
+        identity_matches = tuple(rule for rule in rules if rule.store_item_id == store_item_id)
+        if len(identity_matches) == 1:
+            return RuleMatch(identity_matches[0], RuleMatchKind.EXACT, identity_matches)
+        if identity_matches:
+            return RuleMatch(None, RuleMatchKind.SUGGESTION, identity_matches)
+
     normalized_vendor = _normalize(vendor)
     if upc is not None:
-        for rule in rules:
-            if rule.upc == upc and _normalize(rule.vendor) == normalized_vendor:
-                return RuleMatch(rule=rule, kind=RuleMatchKind.EXACT)
+        upc_matches = tuple(
+            rule
+            for rule in rules
+            if rule.upc == upc and _normalize(rule.vendor) == normalized_vendor
+        )
+        if len(upc_matches) == 1:
+            return RuleMatch(upc_matches[0], RuleMatchKind.EXACT, upc_matches)
+        if upc_matches:
+            return RuleMatch(None, RuleMatchKind.SUGGESTION, upc_matches)
 
     description_matches = tuple(
         rule
@@ -46,9 +62,9 @@ def find_item_rule(
         and _normalize(rule.description) == _normalize(description)
     )
     if len(description_matches) == 1:
-        return RuleMatch(rule=description_matches[0], kind=RuleMatchKind.EXACT)
+        return RuleMatch(description_matches[0], RuleMatchKind.EXACT, description_matches)
     if description_matches:
-        return RuleMatch(rule=description_matches[0], kind=RuleMatchKind.SUGGESTION)
+        return RuleMatch(None, RuleMatchKind.SUGGESTION, description_matches)
     return None
 
 

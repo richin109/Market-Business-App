@@ -164,5 +164,3 @@ def test_draft_keeps_same_description_rows_distinct_by_item_number() -> None:
             "line_total": "7.49",
         },
     ]
-
-

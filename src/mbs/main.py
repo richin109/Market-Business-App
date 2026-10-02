@@ -1,312 +1,91 @@
-from collections.abc import Sequence
-from datetime import date
+from __future__ import annotations
 
-from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Request, Response, status
-from pydantic import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
-from mbs.auth import (
-    AccountLocked,
-    LoginRateLimited,
-    Role,
-    authenticate,
-    consume_reset,
-    create_session,
-    issue_admin_reset,
-    require_role,
-    resolve_session,
-    revoke_session,
-    verify_csrf,
+from fastapi import FastAPI, Request, Response
+from sqlalchemy import select
+
+from mbs.db import SessionLocal
+from mbs.media_assets import MediaAssetService
+from mbs.models import ReceiptUpload
+from mbs.receipts.duplicates import InMemoryPerceptualDuplicateStore, PillowPerceptualHasher
+from mbs.receipts.storage import (
+    LocalProtectedFileStore,
+    UnavailablePDFScanner,
+    receipt_storage_root,
 )
-from mbs.db import get_session
-from mbs.models import AuthSession, Receipt, ReceiptItem, User
-from mbs.receipts.upload import ReceiptUploadService, UploadStatus
-
-app = FastAPI(title="Market Business System")
-SESSION_COOKIE = "mbs_session"
-receipt_upload_service: ReceiptUploadService | None = None
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+from mbs.receipts.upload import DEFAULT_MAX_FILE_BYTES, ReceiptUploadService
+from mbs.routers.auth import router as auth_router
+from mbs.routers.items import router as items_router
+from mbs.routers.receipts import router as receipts_router
+from mbs.routers.remembered_rules import router as remembered_rules_router
+from mbs.routers.settings import router as settings_router
+from mbs.routers.stores import router as stores_router
+from mbs.settings import read_setting
 
 
-class ResetRequest(BaseModel):
-    token: str
-    new_password: str
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    perceptual_store = InMemoryPerceptualDuplicateStore()
+    with SessionLocal() as session:
+        phash_threshold = read_setting(session, "phash_duplicate_threshold")
+        if phash_threshold is None:
+            raise RuntimeError("The phash_duplicate_threshold setting must not be NULL")
+        accepted_fingerprints = session.execute(
+            select(ReceiptUpload.source_sha256, ReceiptUpload.perceptual_hash).where(
+                ReceiptUpload.perceptual_hash.is_not(None),
+                ReceiptUpload.duplicate_status.is_distinct_from("POSSIBLE_DUPLICATE"),
+                ReceiptUpload.duplicate_status.is_distinct_from("CONFIRMED_DUPLICATE"),
+            )
+        )
+        for source_sha256, fingerprint in accepted_fingerprints:
+            if fingerprint is not None:
+                perceptual_store.save(source_sha256, fingerprint)
+    file_store = LocalProtectedFileStore(receipt_storage_root())
+    application.state.media_asset_service = MediaAssetService(file_store)
+    application.state.receipt_upload_service = ReceiptUploadService(
+        max_file_bytes=int(os.environ.get("RECEIPT_MAX_FILE_BYTES", DEFAULT_MAX_FILE_BYTES)),
+        file_store=file_store,
+        malware_scanner=UnavailablePDFScanner(),
+        perceptual_hasher=PillowPerceptualHasher(),
+        perceptual_store=perceptual_store,
+        perceptual_threshold=int(phash_threshold),
+    )
+    yield
 
 
-class AdminResetRequest(BaseModel):
-    username: str
+app = FastAPI(title="Market Business System", lifespan=lifespan)
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "same-origin",
+    "Content-Security-Policy": "frame-ancestors 'self'; base-uri 'self'; form-action 'self'",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+app.include_router(auth_router)
+app.include_router(items_router)
+app.include_router(receipts_router)
+app.include_router(remembered_rules_router)
+app.include_router(settings_router)
+app.include_router(stores_router)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/api/v1/receipts")
-def list_receipts(
-    store: str | None = None,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    page: int = 1,
-    page_size: int = 50,
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> list[dict[str, object]]:
-    _session_user(session, session_token)
-    if page < 1 or page_size < 1 or page_size > 100:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid pagination")
-    query = select(Receipt).where(Receipt.deleted_at.is_(None))
-    if store is not None:
-        query = query.where(Receipt.store == store)
-    if date_from is not None:
-        query = query.where(Receipt.receipt_date >= date_from)
-    if date_to is not None:
-        query = query.where(Receipt.receipt_date <= date_to)
-    receipts = session.scalars(
-        query.order_by(Receipt.receipt_date.desc(), Receipt.receipt_id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    ).all()
-    return [
-        {
-            "receipt_pk": receipt.receipt_pk,
-            "receipt_id": receipt.receipt_id,
-            "store": receipt.store,
-            "purchase_date": receipt.receipt_date.isoformat(),
-            "item_count": session.scalar(
-                select(func.count(ReceiptItem.id)).where(
-                    ReceiptItem.receipt_pk == receipt.receipt_pk
-                )
-            )
-            or 0,
-        }
-        for receipt in receipts
-    ]
-
-
-@app.get("/api/v1/receipts/{receipt_pk}")
-def get_receipt(
-    receipt_pk: str,
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, object]:
-    _session_user(session, session_token)
-    receipt = session.scalar(
-        select(Receipt).where(Receipt.receipt_pk == receipt_pk, Receipt.deleted_at.is_(None))
-    )
-    if receipt is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
-    items = session.scalars(
-        select(ReceiptItem).where(ReceiptItem.receipt_pk == receipt_pk).order_by(ReceiptItem.id)
-    ).all()
-    return _receipt_response(receipt, items)
-
-
-@app.get("/api/v1/receipts/{receipt_pk}/items")
-def get_receipt_items(
-    receipt_pk: str,
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> list[dict[str, object]]:
-    _session_user(session, session_token)
-    receipt_exists = session.scalar(
-        select(Receipt.receipt_pk).where(
-            Receipt.receipt_pk == receipt_pk, Receipt.deleted_at.is_(None)
-        )
-    )
-    if receipt_exists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
-    items = session.scalars(
-        select(ReceiptItem).where(ReceiptItem.receipt_pk == receipt_pk).order_by(ReceiptItem.id)
-    ).all()
-    return [_item_response(item) for item in items]
-
-
-def _receipt_response(receipt: Receipt, items: Sequence[ReceiptItem]) -> dict[str, object]:
-    return {
-        "receipt_pk": receipt.receipt_pk,
-        "receipt_id": receipt.receipt_id,
-        "store": receipt.store,
-        "purchase_date": receipt.receipt_date.isoformat(),
-        "purchase_time": receipt.receipt_time.isoformat(),
-        "transaction_number": receipt.transaction_number,
-        "subtotal": str(receipt.subtotal) if receipt.subtotal is not None else None,
-        "tax": str(receipt.tax) if receipt.tax is not None else None,
-        "total": str(receipt.total),
-        "payment_method": receipt.payment_method,
-        "items": [_item_response(item) for item in items],
-    }
-
-
-def _item_response(item: ReceiptItem) -> dict[str, object]:
-    return {
-        "description": item.description,
-        "upc": item.upc,
-        "quantity": str(item.quantity) if item.quantity is not None else None,
-        "weight_lb": str(item.weight_lb) if item.weight_lb is not None else None,
-        "unit_price": str(item.unit_price) if item.unit_price is not None else None,
-        "line_total": str(item.line_total),
-        "category": item.category,
-        "business_disposition": item.business_disposition,
-    }
-
-
-@app.post("/api/v1/receipts/upload")
-def upload_receipt(
-    request: Request,
-    body: bytes = Body(...),
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, str | None]:
-    user, _ = _session_user(session, session_token)
-    try:
-        require_role(user, Role.ADMIN, Role.MANAGER)
-    except PermissionError as error:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    if receipt_upload_service is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Upload unavailable",
-        )
-    media_type = request.headers.get("content-type", "").split(";", maxsplit=1)[0].strip()
-    try:
-        result = receipt_upload_service.upload(body, media_type)
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    if result.status is UploadStatus.SCAN_PENDING:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=result.status)
-    if result.status is UploadStatus.MALWARE_REJECTED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.status)
-    if result.status is UploadStatus.EXACT_DUPLICATE:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.status)
-    return {
-        "source_sha256": result.source_sha256,
-        "status": result.status,
-        "file_key": result.file_key,
-        "receipt_id": result.receipt.receipt_id if result.receipt is not None else None,
-    }
-
-
-@app.post("/api/v1/auth/login")
-def login(
-    payload: LoginRequest,
-    response: Response,
-    request: Request,
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, str]:
-    try:
-        user = authenticate(
-            session,
-            payload.username,
-            payload.password,
-            client_ip=request.client.host if request.client else None,
-        )
-    except LoginRateLimited as error:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS) from error
-    except AccountLocked as error:
-        raise HTTPException(status_code=status.HTTP_423_LOCKED) from error
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    session_token, csrf_token = create_session(session, user)
-    session.commit()
-    response.set_cookie(
-        SESSION_COOKIE,
-        session_token,
-        max_age=43200,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-    )
-    return {"csrf_token": csrf_token, "role": user.role}
-
-
-def _session_user(session: Session, session_token: str | None) -> tuple[User, AuthSession]:
-    if session_token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
-        )
-    resolved = resolve_session(session, session_token)
-    if resolved is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
-    return resolved
-
-
-@app.get("/api/v1/auth/me")
-def current_user(
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, str | int]:
-    user, _ = _session_user(session, session_token)
-    return {"id": user.id, "username": user.username, "role": user.role}
-
-
-@app.post("/api/v1/auth/logout")
-def logout(
-    response: Response,
-    csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, str]:
-    _, auth_session = _session_user(session, session_token)
-    if csrf_token is None or not verify_csrf(auth_session, csrf_token):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
-    revoke_session(session, auth_session)
-    session.commit()
-    response.delete_cookie(SESSION_COOKIE)
-    return {"status": "ok"}
-
-
-@app.post("/api/v1/auth/admin/reset")
-def admin_reset(
-    payload: AdminResetRequest,
-    csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, str]:
-    admin, auth_session = _session_user(session, session_token)
-    if csrf_token is None or not verify_csrf(auth_session, csrf_token):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
-    try:
-        require_role(admin, Role.ADMIN)
-    except PermissionError as error:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    target = session.scalar(select(User).where(User.username == payload.username.strip()))
-    if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    reset_token = issue_admin_reset(session, admin, target)
-    session.commit()
-    return {"reset_token": reset_token}
-
-
-@app.post("/api/v1/auth/reset")
-def reset_password(
-    payload: ResetRequest,
-    session: Session = Depends(get_session),  # noqa: B008
-) -> dict[str, str]:
-    try:
-        consume_reset(session, payload.token, payload.new_password)
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    session.commit()
-    return {"status": "ok"}
-
-
-@app.get("/api/v1/auth/admin/users")
-def list_users(
-    session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
-    session: Session = Depends(get_session),  # noqa: B008
-) -> list[dict[str, str | int]]:
-    user, _ = _session_user(session, session_token)
-    try:
-        require_role(user, Role.ADMIN)
-    except PermissionError as error:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return [
-        {"id": listed.id, "username": listed.username, "role": listed.role}
-        for listed in session.scalars(select(User).order_by(User.id))
-    ]

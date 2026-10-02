@@ -1,12 +1,50 @@
 # Capability 9: Settings & Governance
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test catalog NULL/defaults and audited concurrent changes, session expiry/revocation, safe URL configuration, least-privilege runtime/migration roles, and UTC/timezone boundaries.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `mbs/governance/` + `tbl_settings` (blueprint §7, §12). Configuration store and the non-negotiable rules enforced at the application layer.
 
 ## Feature 9.1 — Settings Store
 - [ ] Feature complete
-- [ ] `tbl_settings` key-value table with the plan-defined catalog: `mileage_rate` ($0.67), `market_ranking_min_visits` (5), `week_starts_on` (Monday), `testing_mode` (No), `weekly_profit_goal` ($300.00), `safety_stock_pct` (20%, inactive pending a conversion rule), `cost_review_threshold_days` (90), `square_fee_rate` (2.6%), `square_fee_fixed_amount` ($0.10), `low_stock_threshold_pct` (20%, formerly `nonperishable_low_stock_threshold_pct`), `low_stock_alert_min_shelf_life_days` (30), `expiry_scan_interval_minutes` (240), `business_timezone` (required IANA timezone), plus `ocr_engine` (from Capability 1). The Blueprint §7 list is reference material only; this written plan controls.
+- [ ] **Settings catalog defaults (authoritative for seed and RT093).** Every listed key must exist exactly once. `NULL` means intentionally unset; no empty strings are allowed.
+
+| Key | Default |
+|---|---|
+| `business_timezone` | `America/New_York` |
+| `cost_review_threshold_days` | `90` |
+| `currency` | `USD` |
+| `expiry_scan_interval_minutes` | `240` |
+| `image_allowed_media_types` | `image/jpeg,image/png,application/pdf` |
+| `image_max_bytes` | `10000000` |
+| `image_max_dimension_px` | `10000` |
+| `item_mapping_suggestion_limit` | `10` |
+| `low_stock_alert_min_shelf_life_days` | `30` |
+| `low_stock_threshold_pct` | `20` |
+| `market_ranking_min_visits` | `5` |
+| `mileage_rate` | `0.67` |
+| `ocr_engine` | `tesseract-opencv` |
+| `phash_duplicate_threshold` | `6` |
+| `receipt_image_extraction_enabled` | `No` |
+| `receipt_image_min_dimension_px` | `100` |
+| `receipt_raw_retention_days` | `NULL` |
+| `receipt_source_retention_days` | `NULL` |
+| `safety_stock_pct` | `20` |
+| `session_idle_timeout_minutes` | `120` |
+| `square_fee_fixed_amount` | `0.10` |
+| `square_fee_rate` | `0.026` |
+| `store_alias_normalization_version` | `casefold-trim-whitespace-punctuation-store-number-v1` |
+| `tax_year` | `2026` |
+| `testing_mode` | `No` |
+| `week_starts_on` | `Monday` |
+| `weekly_profit_goal` | `300.00` |
+| `backup_destination_reference` | `NULL` |
+| `backup_retention_period_days` | `NULL` |
+| `backup_encryption_key_owner` | `NULL` |
+| `backup_restore_test_owner` | `NULL` |
+- [x] `tbl_settings` key-value table seeded with the documented Capability 9.1 catalog. The Blueprint §7 list is reference material only; this written plan controls.
 - [ ] Keep `week_starts_on` locked to Monday in MVP 1–8 per D-33 (period starts Monday 00:00, close Monday 03:00 local). Do not accept another day through settings/API until an owner-approved migration and closed-period restatement rule exist.
 - [ ] Include `session_idle_timeout_minutes` in the settings catalog with a default of 120 minutes and validated safe bounds. This setting controls idle expiration only; it cannot extend the fixed 12-hour absolute session lifetime (D-14).
 - [ ] Store identity and item mapping are master data, not settings. Settings hold only the matching controls: `store_alias_normalization_version` (the casefold/trim/whitespace/punctuation/store-number rule set applied to alias keys) and `item_mapping_suggestion_limit` (maximum ranked suggestions shown). Matching itself is exact on the normalized alias key; no setting may enable automatic fuzzy store grouping or automatic description-based item merging.
@@ -15,7 +53,7 @@ Bounded context: `mbs/governance/` + `tbl_settings` (blueprint §7, §12). Confi
 - [ ] Settings API (read for VIEWER+, write for ADMIN) — changes apply immediately, no service restart.
 - [ ] Provide ADMIN-only backup settings for the destination reference, retention period, encryption-key owner, and restore-test owner. Never store encryption keys or secret credentials in `tbl_settings`; validate the destination before enabling real-data backup.
 - [ ] Document the four keys retained under D-65 in this catalog: `currency` (the single operating currency asserted in the overview scope assumptions, while per-record currency identifiers stay on the records), `tax_year`, `receipt_source_retention_days`, and `receipt_raw_retention_days`. Represent unset values as `NULL`, never an empty string, so an unanswered retention period is distinguishable from a configured zero; the retention keys stay `NULL` and no automatic purge runs until U-3 supplies them (D-15). `tax_year` is a screen default that pre-selects a year in tax workpapers and reporting; it never decides which records belong to a tax year, which is always derived from each record's own business date, so a stale value cannot misfile data. Market calendar and holiday exceptions are Capability 5 per-market dated master data, not settings.
-- [ ] Reconcile the seeded baseline with this catalog through a new Alembic revision: the evidence-S1 seed uses `week_start` (catalog: `week_starts_on`) and seeds `currency`, `tax_year`, and two retention-day keys that D-65 now documents above, while most catalog keys are missing. Add the missing catalog keys, rename `week_start`, keep the four D-65 keys, represent unset values as `NULL` rather than empty strings, and add a settings reader with at least one production caller (R7, RT093). RT093's check must be **driven by this catalog**, asserting that every documented key is seeded with its documented default, that unset values are `NULL`, and that no undocumented key exists; a hard-coded key count is forbidden because it breaks on every future catalog change.
+- [x] Reconcile the seeded baseline through Alembic revision 0012: rename `week_start`, seed the documented catalog, preserve D-65 keys, represent unset values as `NULL`, and use the DB-backed settings reader at application startup. RT093 derives keys/defaults from this catalog and checks NULL and undocumented-key behavior without a literal count.
 - [ ] Imagery settings (D-41–D-44, approved 2026-09-30): `image_allowed_media_types`, `image_max_bytes`, `image_max_dimension_px`, `receipt_image_min_dimension_px`, and `receipt_image_extraction_enabled`. Thumbnail (320 px box) and display (1024 px) sizes are fixed by D-41, not settings. There is no image-generation setting (D-44). Move the near-duplicate threshold (D-08, currently the constant `DEFAULT_PHASH_THRESHOLD = 6`) into this store as `phash_duplicate_threshold`.
 - [ ] Changing a non-historical calculation setting (for example, cost review threshold) re-derives affected current outputs; effective-dated rates apply prospectively and do not rewrite historical results.
 
@@ -36,7 +74,8 @@ Bounded context: `mbs/governance/` + `tbl_settings` (blueprint §7, §12). Confi
 
 ## Feature 9.3 — Error Logging
 - [ ] Feature complete
-- [ ] Central error log table capturing ETL/import/governance rule violations with severity, timestamp, and source module — feeds the Release Gate (Capability 10). The table exists from evidence S1 but has no writer; this step stays unchecked until at least the OCR, upload, and import failure paths write to it (R7).
+- [ ] **Not started:** the error-log table exists, but there is no centralized writer and no OCR, upload, or import failure path currently writes to it. This remains a release gap outside R7.
+- [ ] Central error log table capturing ETL/import/governance rule violations with severity, timestamp, and source module — feeds the Release Gate (Capability 10). The table exists from evidence S1 but has no writer; this remains explicitly not started until at least OCR, upload, and import failure paths write to it.
 
 ## Feature 9.4 — Authentication & User Lifecycle
 - [ ] Feature complete

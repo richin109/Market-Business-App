@@ -6,9 +6,10 @@ from alembic.config import Config
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from mbs.models import Receipt, ReceiptItem, ReceiptUpload
+from mbs.models import AuditLog, Receipt, ReceiptItem, ReceiptUpload
 from mbs.receipts.ocr import normalize_receipt
 from mbs.receipts.persistence import create_upload, persist_extracted_receipt
+from tests.database import postgres_test_url
 
 
 def _receipt() -> Any:
@@ -37,9 +38,9 @@ def _receipt() -> Any:
 
 def test_receipt_migration_round_trips_raw_snapshot_and_normalized_items(tmp_path: Path) -> None:
     database_path = tmp_path / "receipts.db"
-    engine = create_engine(f"sqlite:///{database_path}")
+    engine = create_engine(postgres_test_url(database_path))
     config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+    config.set_main_option("sqlalchemy.url", postgres_test_url(database_path).replace("%", "%%"))
     command.upgrade(config, "head")
     extracted = _receipt()
     original_raw = extracted.raw_ocr_document
@@ -67,13 +68,19 @@ def test_receipt_migration_round_trips_raw_snapshot_and_normalized_items(tmp_pat
     assert stored_upload is not None
     assert stored_upload.processing_status == "SUCCEEDED"
     assert stored_upload.ocr_attempts == 1
+    with Session(engine) as session:
+        imported = session.scalars(
+            select(AuditLog).where(AuditLog.event_type == "RECEIPT_IMPORTED")
+        ).all()
+    assert [row.entity_id for row in imported] == [receipt_pk]
+    assert f"upload_pk={upload_pk}" in (imported[0].details or "")
 
 
 def test_receipt_id_is_unique_in_the_database(tmp_path: Path) -> None:
     database_path = tmp_path / "unique.db"
-    engine = create_engine(f"sqlite:///{database_path}")
+    engine = create_engine(postgres_test_url(database_path))
     config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+    config.set_main_option("sqlalchemy.url", postgres_test_url(database_path).replace("%", "%%"))
     command.upgrade(config, "head")
     extracted = _receipt()
 

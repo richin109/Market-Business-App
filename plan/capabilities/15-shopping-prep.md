@@ -1,5 +1,8 @@
 # Capability 15: Market Shopping & Prep
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test plan/version uniqueness and zero target stock, coherent balance/cost reads, shared-service remainder/correction atomicity, and concurrent finalization/outbox idempotency.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `src/mbs/prep/`. Owns planned market loads, store-grouped shopping lists, and confirmed prep events. It consumes markets from Capability 5, recipes/costs from Capability 4, and the single MVP 2 `StockBalanceReader` for all balance questions (D-59), whose implementation Capability 6 replaces in MVP 6 behind the same interface. It delegates outbound WhatsApp transport to Capability 13. A plan is not a purchase, production, sale, or inventory movement until explicitly confirmed.

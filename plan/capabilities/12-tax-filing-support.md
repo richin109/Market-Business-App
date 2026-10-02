@@ -1,5 +1,8 @@
 # Capability 12: Tax Information & Filing Support
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test full tax-year dates, Decimal reconciliation, immutable lineage/exports from coherent snapshots, mapping-period races, and restore verification; database changes never waive human/provider approvals.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `mbs/tax_reporting/`. Produces year-specific, reviewable business-tax workpapers and source-linked exports for the owner or tax professional. This capability supports preparation; it does not determine legal tax treatment, calculate a final tax liability, prepare the owner's complete personal return, or transmit/file returns.

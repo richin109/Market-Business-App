@@ -91,10 +91,18 @@ From **PowerShell** in the repository root, verify the planned local web, Postgr
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 docker compose config
-docker compose up --build -d
+docker compose up --build -d postgres redis
+docker compose run --rm --build migrate
+docker compose up --build -d web celery-worker celery-beat
+docker compose run --rm --build test
+docker compose run --rm --build test-migrations-postgres
 docker compose ps
 Invoke-RestMethod http://127.0.0.1:8000/health
 docker compose down
 ```
 
-The health endpoint should return `{"status":"ok"}`. See the [README's Docker Compose workflow](../README.md#local-development) for containerized tests, lint, and logs. These commands were verified on this laptop on 2026-09-30 (Docker Desktop 29.8.1, Compose v5.5.1); see [Capability 11.1](../plan/capabilities/11-deployment-infrastructure.md#feature-111--local-development-this-laptop). Terminals opened before Docker was installed will not find `docker` — open a new terminal. Do not use the local hot-reload Compose file as a production deployment.
+The health endpoint should return `{"status":"ok"}`. PostgreSQL is the sole runtime and database-test engine. The app uses the latest published official Python 3.14 Trixie image (currently 3.14.7); Python 3.12 remains the compatibility minimum. Tests are excluded from runtime; the dedicated test target includes PostgreSQL 18 clients and Chromium. Rebuild after source/test/migration changes, then use `docker compose run --rm test pytest <test-file> -q` for a focused run. Missing database configuration fails instead of silently skipping. No Node installation is required.
+
+Compose assembles connection credentials from `POSTGRES_*` unless `DATABASE_URL` overrides them; split fields handle literal special characters. Published PostgreSQL dev ports bind only to loopback (defaults 5432 for the app and 55432 for the dedicated synthetic test service). Configure `MBS_POSTGRES_PORT`/`MBS_TEST_POSTGRES_PORT` if those ports are occupied. A Windows host process must use `127.0.0.1`, not the container hostname `postgres`, and must not use application credentials for tests. See [README](../README.md#local-development) for host-debugging caveats and the shared generic SQLAlchemy configuration.
+
+The original stack commands were verified 2026-10-01 (Docker Engine 29.8.1, Compose v5.5.1, PostgreSQL 18.6, Redis 8.10.2). D-77 conversion evidence is recorded in [the current slice](../plan/03-current-slice.md); this guide alone is not test evidence. The earlier data-volume reset was explicitly authorized; never use `docker compose down -v` as routine troubleshooting. Open a new terminal if it predates Docker installation. Production must use its separately gated immutable profile without reload, host DB ports, test services, source mounts, or example passwords.

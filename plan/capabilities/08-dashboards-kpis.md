@@ -1,5 +1,8 @@
 # Capability 8: Dashboards & KPIs
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test aggregation precision, source/test-record filters, incomplete totals, stable pagination/order, and snapshot-consistent KPI drill-through tied to the published refresh version.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `mbs/reporting/` dashboard layer (blueprint §8 Dashboard layer, §9.6). Pre-aggregated KPIs for operations and executive views, rendered as server-side Jinja2/HTMX pages with embedded charts.

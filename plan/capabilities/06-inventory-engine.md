@@ -1,5 +1,8 @@
 # Capability 6: Inventory Engine
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Prove deterministic FEFO ties, Numeric conservation, coherent snapshots, and overlapping consumption/expiry/close jobs with lock ordering, bounded deadlock retry, unique events, and atomic restatement.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `mbs/inventory/` (blueprint §3.1 #2, Modules 5, 15–16). Weekly inventory snapshots, spoilage automation, carry-forward, valuation, and reorder points.

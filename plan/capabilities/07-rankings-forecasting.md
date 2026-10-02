@@ -1,5 +1,8 @@
 # Capability 7: Rankings & Forecasting
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Prove deterministic ties/as-of boundaries, full-date history, NULL/blocked versus zero semantics, and ranking/forecast publication from one accepted refresh version without mixed snapshots.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded contexts: `mbs/reporting/` + `mbs/forecasting/` (blueprint §3.1 #6/#8, Modules 11–14). Product scorecards, market rankings, opportunity engine, and rolling forecasts.

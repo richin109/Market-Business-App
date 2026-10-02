@@ -1,5 +1,8 @@
 # Capability 3: Square Platform Integration
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test staging JSON, provider uniqueness, atomic cursor/row commit, rollback/retry with independent sessions, and UTC/business dates; provider calls stay outside locked transactions.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `src/mbs/integrations/square/` (blueprint §8, §9.4). Owns Square credentials, Catalog/Orders/Payments API access, raw staging, cursor management, and provider sync logs. Accepted Square sales facts, COGS, and market assignment belong to Capability 14. The Square app/POS outside MBS captures every actual sale.

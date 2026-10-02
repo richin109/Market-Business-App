@@ -1,5 +1,8 @@
 # Capability 14: Sales Ledger & Reconciliation
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test provider order/line uniqueness under concurrent acceptance, Numeric totals/refunds, immutable cost/market snapshots, full-date/DST attribution, and atomic late-event reconciliation without duplicate sales.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `src/mbs/sales/`. Owns canonical Square sales facts and financial reconciliation. The Square app/POS outside MBS captures every actual sale, including cash-tender sales. Square API transport and raw staging belong to Capability 3; product costs to Capability 4; market identity/visits to Capability 5; tax workpapers to Capability 12.

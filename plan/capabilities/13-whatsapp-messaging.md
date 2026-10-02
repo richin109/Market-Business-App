@@ -1,5 +1,8 @@
 # Capability 13: WhatsApp Business Messaging
 
+Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test persisted send/outbox/version identity, concurrent claim/webhook retry, rollback/savepoint recovery, and one local event per source. Call providers after local commit, not while holding row locks.
+
 - [ ] **Capability complete** (all features below checked)
 
 Bounded context: `mbs/messaging/`. Send an explicitly reviewed WhatsApp message from the application through the official Meta WhatsApp Business Platform Cloud API. This is a paid/usage-governed external integration, not the free `wa.me` handoff; current Meta pricing and platform rules apply.
