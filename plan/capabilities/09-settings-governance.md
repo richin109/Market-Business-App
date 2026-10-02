@@ -74,8 +74,9 @@ Bounded context: `mbs/governance/` + `tbl_settings` (blueprint §7, §12). Confi
 
 ## Feature 9.3 — Error Logging
 - [ ] Feature complete
-- [ ] **Not started:** the error-log table exists, but there is no centralized writer and no OCR, upload, or import failure path currently writes to it. This remains a release gap outside R7.
-- [ ] Central error log table capturing ETL/import/governance rule violations with severity, timestamp, and source module — feeds the Release Gate (Capability 10). The table exists from evidence S1 but has no writer; this remains explicitly not started until at least OCR, upload, and import failure paths write to it.
+- [ ] Capability 9 owns the centralized operational-error taxonomy and writer for `tbl_error_log`; domain capabilities report sanitized operational failures through it. Keep expected business holds/exceptions in their owning workflow and user/security actions in `AuditLog`; do not duplicate those as unclassified errors.
+- [ ] Record severity, stable error code, source context, correlation/source-event ID when available, UTC timestamp, and retryability. Redact credentials, tokens, receipt values, and unnecessary personal data. Logging failure must not turn a committed business event into a retry that duplicates it.
+- [ ] Wire at least upload, OCR worker, and provider-import failure paths through the shared writer in the Receipt MVP implementation sequence. Add a real-entry-point test for each, including retry/idempotency and sensitive-field redaction; make these assertions part of `receipt-mvp` and the later provider profiles.
 
 ## Feature 9.4 — Authentication & User Lifecycle
 - [ ] Feature complete

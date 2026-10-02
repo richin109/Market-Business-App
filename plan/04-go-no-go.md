@@ -1,4 +1,7 @@
 # MVP Go / No-Go Assessment (Vibe-Coding Readiness)
+# MVP Go / No-Go Assessment (Vibe-Coding Readiness)
+
+Architecture and execution-boundary review dated 2026-10-02: [05-architecture-and-execution-review.md](05-architecture-and-execution-review.md). This clarifies technical ownership only and does not alter approved business decisions.
 
 Assessment date: 2026-09-30. Reviewer role: senior QA, AI-agent ("vibe") delivery.
 Scope: MVP 1–8 in [01-mvp-roadmap.md](01-mvp-roadmap.md), judged against the written plan files: [00-overview.md](00-overview.md), [02-implementation-readiness.md](02-implementation-readiness.md), [03-current-slice.md](03-current-slice.md), all 16 capability files, and [test-case-manifest.csv](test-case-manifest.csv). The Blueprint DOCX and files in `support/` are reference materials reviewed for context, not competing authority.
