@@ -12,7 +12,9 @@ The full MBS release gate preserves the useful intent of the source-workbook reg
 MVP 2-8 implementation order and slice contracts are defined in [mvp-slice-specifications.md](../mvp-slice-specifications.md). This file defines release profiles; it does not authorize an agent to skip the bounded-slice workflow in `03-current-slice.md`.
 
 ## Feature 10.1 — Regression Test Suite
+All profiles follow the [fast-development contract](../00-overview.md#fast-test-development-contract-all-stages): local focused/full checks use `test-dev`; CI and candidate certification use rebuilt, unmounted images. Database isolation, full-suite coverage, migration/browser checks and private-data gates are unchanged.
 - [ ] Feature complete
+- [ ] For every future slice, run focused `docker compose run --rm test-dev pytest <tests> -q`, then mounted Ruff, strict mypy and the full suite; record working-tree evidence separately from candidate-image evidence and report all skips. Do not use cache hints or selective reruns to claim full coverage.
 - [ ] Test Shelf Life capture and reuse: a new product/ingredient/supply requires an explicit duration or `never`, the confirmed answer becomes the remembered default for later lots of that item, list `Perishable By` is derived from that shelf life and the acquisition instant, explicit overrides survive list copying, and `never` items show no date. Test days/weeks/months arithmetic in `business_timezone`, month-end clamping, and DST weeks (SL-001, SL-003).
 - [ ] Test scheduled expiry processing runs at worker startup and on the `expiry_scan_interval_minutes` interval, wastes each lot exactly once at its `Perishable By` (including lots that expired while the system was stopped), dates the waste movement at `Perishable By` rather than scan time so a lot expiring between scans lands in the correct period, survives restart/retry/overlapping runs without double waste, and leaves unexpired lots untouched across a weekly close (SL-004).
 - [ ] Test that a stock item with no recorded Shelf Life is rejected before persistence rather than defaulted; test legacy `is_perishable` migration (FALSE → `never`, TRUE → required owner-entered duration), `never` items carrying forward, and unexpired perishable lots carrying forward with their dates intact (SL-001).
@@ -80,6 +82,7 @@ MVP 2-8 implementation order and slice contracts are defined in [mvp-slice-speci
 
 ## Feature 10.4 — CI Integration
 - [ ] Feature complete
+- [ ] Keep CI/release execution unmounted and candidate-image based; preserve separate local `test-dev` commands without changing the manifest's candidate validation commands. Rebuild after source/test/migration changes before collecting image evidence, and include freshness/isolation regression checks when editing the development runner or Docker layer layout.
 - [ ] GitHub Actions selects the matching named profile for each MVP release and pull request, plus tests for affected upstream contracts; MVP 7 runs all applicable/transformed source-test intents and verifies documented not-applicable decisions, and MVP 8 runs `full-mbs`. Failed required tests block promotion of that MVP (see Capability 11).
 - [ ] Install the pinned Playwright Python test dependency and Chromium browser in CI; run the UI end-to-end suite for each MVP profile that delivers browser UI. Do not add a separate Node.js frontend build pipeline for browser tests.
 - [ ] Lint gate: `ruff` + `mypy` for Python (no `eslint`/`jest` needed since the frontend is now server-rendered Jinja2/HTMX, not a separate JS app).

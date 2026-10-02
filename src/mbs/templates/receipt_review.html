@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Receipt Review | Market Business System</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f4f6f2; color: #1d2924; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.4rem 1rem 3rem; }
+    h1 { margin: 0; font-size: 1.65rem; }
+    h2 { margin: .2rem 0 0; font-size: 1rem; }
+    .receipt-meta { color: #53625a; margin: .45rem 0 1.25rem; }
+    .review-columns { display: grid; grid-template-columns: minmax(18rem, 1fr) minmax(25rem, 1.2fr); gap: 1rem; align-items: start; }
+    .source-panel { min-width: 0; background: white; border: 1px solid #d3ddd5; border-radius: 5px; padding: .9rem; }
+    .source-tools { display: flex; justify-content: space-between; gap: .75rem; align-items: end; margin-bottom: .65rem; }
+    .source-tools label { flex: 1; min-width: 0; }
+    .page-tools { display: flex; align-items: end; gap: .35rem; }
+    .page-tools input { width: 4.2rem; min-width: 0; padding: .55rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    .source-stage { min-height: 24rem; height: 66vh; max-height: 54rem; overflow: auto; background: #e9eeeb; }
+    .source-stage iframe, .source-stage img { display: block; width: 100%; height: 100%; border: 0; object-fit: contain; }
+    .source-stage [hidden] { display: none; }
+    .source-stage img:not([hidden]) { display: block; }
+    .view-controls { display: flex; align-items: center; gap: .65rem; margin: .5rem 0; }
+    .view-controls input { width: min(12rem, 45vw); }
+    .source-state { color: #53625a; font-size: .92rem; margin: .55rem 0; }
+    .source-decision { display: grid; gap: .6rem; border-top: 1px solid #d3ddd5; padding-top: .7rem; margin-top: .7rem; }
+    .source-decision select, .source-decision textarea { width: 100%; min-width: 0; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    .source-decision textarea { min-height: 4rem; resize: vertical; }
+    .source-decision button { justify-self: start; }
+    .line-list { display: grid; gap: .75rem; }
+    .line { background: white; border: 1px solid #d3ddd5; border-radius: 5px; padding: .9rem; }
+    .correction-form { display: grid; gap: .7rem; margin: .8rem 0; }
+    .correction-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+    .correction-fields input { min-width: 0; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    .correction-form textarea { min-height: 3rem; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    .line-head { display: flex; justify-content: space-between; gap: .8rem; align-items: start; }
+    .line-source, .line-meta { color: #53625a; font-size: .92rem; }
+    .line-meta { display: flex; gap: .5rem 1rem; flex-wrap: wrap; margin: .55rem 0; }
+    .image-candidates { border-top: 1px solid #d3ddd5; margin-top: .7rem; padding-top: .7rem; }
+    .image-candidate { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .75rem; padding: .65rem 0; border-bottom: 1px solid #e2e8e3; }
+    .image-candidate img { width: 7rem; aspect-ratio: 1; object-fit: contain; background: #edf0ed; }
+    .candidate-details { display: grid; gap: .45rem; min-width: 0; }
+    .candidate-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .candidate-details select, .candidate-details input { min-width: 0; padding: .45rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    .review-controls { display: grid; grid-template-columns: minmax(13rem, 1fr) minmax(12rem, .8fr) auto; gap: .7rem; align-items: end; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    select, button { min-width: 0; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    button { background: #fff; color: #18392b; cursor: pointer; }
+    button:hover { background: #e7efe9; }
+    .status { color: #286143; }
+    .needs-review { border-left: 4px solid #c47c00; background: #fff3d6; padding-left: .55rem; }
+    .review-warning { color: #8a4b00; font-weight: 700; }
+    .message { min-height: 1.2rem; margin: .45rem 0 0; color: #286143; }
+    .message[data-error="true"] { color: #a2312c; }
+    @media (max-width: 620px) {
+      main { padding: 1rem .7rem 2rem; }
+      .review-columns { grid-template-columns: minmax(0, 1fr); }
+      .source-tools { align-items: stretch; flex-direction: column; }
+      .page-tools { justify-content: start; }
+      .source-stage { height: 55vh; min-height: 20rem; }
+      .line-head { display: block; }
+      .review-controls { grid-template-columns: 1fr; }
+      .review-controls button { justify-self: start; }
+      .correction-fields { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Receipt Review</h1>
+    <p class="receipt-meta">{{ receipt.store }} · {{ receipt.receipt_date }} · {{ receipt.receipt_id }}</p>
+    {% if total_mismatch %}<p class="review-warning" role="status">Line totals do not reconcile to the item subtotal; approval is blocked.</p>{% endif %}
+    {% if attention_fields %}<p class="review-warning" role="status">Review highlighted extracted fields: {{ attention_fields | join(", ") }}</p>{% endif %}
+    {% if not corrections_locked %}
+    <form class="correction-form" data-correction-form data-receipt-id="{{ receipt.receipt_pk }}">
+      <h2>Correct receipt header</h2>
+      <div class="correction-fields">
+        <label class="{{ 'needs-review' if 'store' in attention_fields else '' }}">Store<input name="store" data-correction-field data-initial="{{ receipt.store }}" value="{{ receipt.store }}" required maxlength="255"></label>
+        <label class="{{ 'needs-review' if 'date' in attention_fields else '' }}">Purchase date<input type="date" name="receipt_date" data-correction-field data-initial="{{ receipt.receipt_date.isoformat() }}" value="{{ receipt.receipt_date.isoformat() }}" required></label>
+        <label class="{{ 'needs-review' if 'time' in attention_fields else '' }}">Purchase time<input type="time" step="1" name="receipt_time" data-correction-field data-initial="{{ receipt.receipt_time.strftime('%H:%M:%S') }}" value="{{ receipt.receipt_time.strftime('%H:%M:%S') }}" required></label>
+        <label class="{{ 'needs-review' if 'transaction_number' in attention_fields else '' }}">Transaction number<input name="transaction_number" data-correction-field data-initial="{{ receipt.transaction_number }}" value="{{ receipt.transaction_number }}" required maxlength="100"></label>
+        <label class="{{ 'needs-review' if 'subtotal' in attention_fields else '' }}">Item subtotal<input type="number" step="0.01" name="subtotal" data-correction-field data-initial="{{ receipt.subtotal if receipt.subtotal is not none else '' }}" value="{{ receipt.subtotal if receipt.subtotal is not none else '' }}"></label>
+        <label class="{{ 'needs-review' if 'tax' in attention_fields else '' }}">Tax<input type="number" step="0.01" name="tax" data-correction-field data-initial="{{ receipt.tax if receipt.tax is not none else '' }}" value="{{ receipt.tax if receipt.tax is not none else '' }}"></label>
+        <label class="{{ 'needs-review' if 'total' in attention_fields else '' }}">Receipt total<input type="number" step="0.01" name="total" data-correction-field data-initial="{{ receipt.total }}" value="{{ receipt.total }}" required></label>
+        <label class="{{ 'needs-review' if 'payment_method' in attention_fields else '' }}">Payment method<input name="payment_method" data-correction-field data-initial="{{ receipt.payment_method or '' }}" value="{{ receipt.payment_method or '' }}" maxlength="50"></label>
+      </div>
+      <label>Reason<textarea name="reason" required minlength="1" maxlength="2000"></textarea></label>
+      <button type="submit">Save header correction</button>
+      <p class="message" role="status" aria-live="polite"></p>
+    </form>
+    {% endif %}
+    <div class="review-columns">
+      {% if sources %}
+      <section class="source-panel" data-source-viewer aria-label="Receipt source viewer">
+        <div class="source-tools">
+          <label>Source
+            <select data-source-select aria-label="Receipt source">
+              {% for source in sources %}
+              <option value="{{ source.id }}" data-kind="{{ source.kind }}"
+                      data-media-type="{{ source.media_type }}" data-page-count="{{ source.page_count }}"
+                      data-content-url="{{ source.content_url }}">
+                {{ source.kind }} · {{ source.media_type }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="page-tools" data-page-tools>
+            <button type="button" data-page-previous aria-label="Previous page" title="Previous page">&#x2039;</button>
+            <label>Page
+              <input type="number" data-page-number min="1" max="{{ sources[0].page_count }}" value="1" aria-label="Source page">
+            </label>
+            <span data-page-count>of {{ sources[0].page_count }}</span>
+            <button type="button" data-page-next aria-label="Next page" title="Next page">&#x203A;</button>
+          </div>
+        </div>
+        <div class="view-controls">
+          <label>Zoom
+            <input type="range" data-source-zoom min="50" max="200" step="10" value="100" aria-label="Source zoom">
+          </label>
+          <button type="button" data-source-rotate data-rotation="0" aria-label="Rotate source clockwise" title="Rotate source clockwise">&#x21BB;</button>
+        </div>
+        <div class="source-stage" data-source-stage>
+          {% if sources[0].media_type == "application/pdf" %}
+          <iframe data-source-frame title="Receipt source page" src="{{ sources[0].content_url }}#page=1"></iframe>
+          <img data-source-image alt="Receipt source image" hidden>
+          {% else %}
+          <iframe data-source-frame title="Receipt source page" hidden></iframe>
+          <img data-source-image alt="Receipt source image" src="{{ sources[0].content_url }}">
+          {% endif %}
+        </div>
+        <p class="source-state" data-source-state>{{ sources[0].kind }}</p>
+        {% for source in sources %}
+          {% if source.kind == "PENDING" %}
+        <form class="source-decision" data-source-decision data-source-id="{{ source.id }}"
+              data-receipt-id="{{ receipt.receipt_pk }}">
+          <strong>Review this source</strong>
+          <label>Source decision
+            <select name="decision">
+              <option value="COPY">Overlapping copy</option>
+              <option value="SUPPLEMENT">Additional evidence</option>
+              <option value="REJECT">Reject source</option>
+            </select>
+          </label>
+          <label>Reason
+            <textarea name="reason" required minlength="1" maxlength="2000"></textarea>
+          </label>
+          {% if source.repeated_lines %}
+          <fieldset data-repeat-confirmations>
+            <legend>Confirm separate repeated purchases</legend>
+            {% for line in source.repeated_lines %}
+            <label>
+              <input type="checkbox" name="confirmed_repeated_line_indexes" value="{{ line.index }}" disabled>
+              {{ line.description }} · source page {{ line.source_page }}, line {{ line.source_line_number }} is a distinct purchase
+            </label>
+            {% endfor %}
+          </fieldset>
+          {% endif %}
+          <button type="submit">Save source decision</button>
+          <p class="source-state" role="status" aria-live="polite"></p>
+        </form>
+          {% endif %}
+        {% endfor %}
+        {% if unassigned_image_candidates %}
+        <div class="image-candidates" aria-label="Unassigned receipt image candidates">
+          <h2>Unassigned receipt images</h2>
+          {% for candidate in unassigned_image_candidates %}
+          <div class="image-candidate" data-image-candidate data-candidate-id="{{ candidate.id }}"
+               data-receipt-id="{{ receipt.receipt_pk }}">
+            <img src="{{ candidate.thumbnail_url }}" alt="Unassigned receipt image candidate">
+            <div class="candidate-details">
+              <strong>{{ candidate.status }} · Page {{ candidate.page }}</strong>
+              {% if candidate.status == "PENDING" %}
+              <label>Attach to receipt line
+                <select data-candidate-line required>
+                  <option value="">Choose a line</option>
+                  {% for line in lines %}<option value="{{ line.id }}">{{ line.display_name }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>Rejection reason<input data-rejection-reason maxlength="2000"></label>
+              <div class="candidate-actions">
+                <button type="button" data-candidate-confirm>Confirm image</button>
+                <button type="button" data-candidate-reject>Reject image</button>
+              </div>
+              {% elif candidate.reason %}<span>{{ candidate.reason }}</span>{% endif %}
+              <p class="message" data-candidate-message role="status" aria-live="polite"></p>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+      {% endif %}
+    <section class="line-list" aria-label="Receipt lines">
+      {% for line in lines %}
+      <article class="line" data-line-id="{{ line.id }}" data-approved="{{ 'true' if line.approved else 'false' }}">
+        <div class="line-head">
+          <div>
+            <h2>{{ line.display_name }}</h2>
+            <div class="line-source">
+              Printed: {{ line.description }} · Product ID: {{ line.store_product_id or "Missing" }}
+              {% if line.identifier_source %} · {{ line.identifier_source }}{% endif %}
+            </div>
+          </div>
+          {% if line.approved %}
+          <strong class="status">{{ line.posting_status }}</strong>
+          {% elif line.is_excluded %}
+          <strong class="status">Excluded · {{ line.exclusion_reason }}</strong>
+          {% endif %}
+        </div>
+        {% if not corrections_locked and not line.is_excluded %}
+        <form class="correction-form" data-correction-form data-receipt-id="{{ receipt.receipt_pk }}" data-item-index="{{ loop.index0 }}">
+          <h2>Correct line</h2>
+          <div class="correction-fields">
+            <label>Description<input name="description" data-correction-field data-initial="{{ line.description }}" value="{{ line.description }}" required maxlength="255"></label>
+            <label>UPC<input name="upc" data-correction-field data-initial="{{ line.upc or '' }}" value="{{ line.upc or '' }}" maxlength="50"></label>
+            <label>Package count<input type="number" min="0" step="any" name="package_count" data-correction-field data-initial="{{ line.package_count or '' }}" value="{{ line.package_count or '' }}"></label>
+            <label>Pack size<input type="number" min="0" step="any" name="pack_size" data-correction-field data-initial="{{ line.pack_size or '' }}" value="{{ line.pack_size or line.remembered_pack_size or '' }}"></label>
+            <label>Pack unit<input name="pack_unit" data-pack-unit data-correction-field data-initial="{{ line.pack_unit or '' }}" value="{{ line.pack_unit or line.remembered_pack_unit or '' }}" list="unit-aliases-{{ line.id }}">
+              <datalist id="unit-aliases-{{ line.id }}">
+                {% for alias in unit_aliases %}<option value="{{ alias }}">{% endfor %}
+              </datalist>
+              <span data-unit-suggestion hidden></span>
+              <button type="button" data-confirm-unit hidden></button>
+            </label>
+            {% if line.package_suggestion %}<p class="line-source">Remembered package size; verify before saving.</p>{% endif %}
+            <label>Unit price<input type="number" step="0.01" name="unit_price" data-correction-field data-initial="{{ line.unit_price or '' }}" value="{{ line.unit_price or '' }}"></label>
+            <label>Calculated line total<output data-calculated-line-total>{{ line.line_total }}</output></label>
+          </div>
+          <label>Reason<textarea name="reason" required minlength="1" maxlength="2000"></textarea></label>
+          {% if line.has_store_item %}
+          <label><span>Package default</span><span><input type="checkbox" name="remember_package_default"> Remember this size/unit for this store item</span></label>
+          {% endif %}
+          <button type="submit">Save line correction</button>
+          <button type="submit" name="exclude_line" value="{{ line.id }}">Exclude bogus line</button>
+          <p class="message" role="status" aria-live="polite"></p>
+        </form>
+        {% endif %}
+        <div class="line-meta">
+          <span>{{ line.category }}</span>
+          {% if line.low_confidence %}<span class="review-warning">Low-confidence OCR</span>{% endif %}
+          <span>Quantity: {{ line.quantity or "Not recorded" }}</span>
+          <span>Unit price: {{ line.unit_price or "Not recorded" }}</span>
+          <span>Total: {{ line.line_total }}</span>
+          {% if not line.mapping_confirmed %}<span>Mapping needs confirmation</span>{% endif %}
+        </div>
+        {% if line.image_candidates %}
+        <div class="image-candidates" aria-label="Receipt image candidates">
+          <strong>Receipt image candidates</strong>
+          {% for candidate in line.image_candidates %}
+          <div class="image-candidate" data-image-candidate data-candidate-id="{{ candidate.id }}"
+               data-receipt-id="{{ receipt.receipt_pk }}" data-line-id="{{ line.id }}">
+            <img src="{{ candidate.thumbnail_url }}" alt="Receipt image candidate for {{ line.display_name }}">
+            <div class="candidate-details">
+              <strong>{{ candidate.status }} · Source page {{ candidate.page }}</strong>
+              {% if candidate.status == "PENDING" %}
+              <label>Rejection reason<input data-rejection-reason maxlength="2000"></label>
+              <div class="candidate-actions">
+                <button type="button" data-candidate-confirm>Confirm image</button>
+                <button type="button" data-candidate-reject>Reject image</button>
+              </div>
+              {% elif candidate.reason %}<span>{{ candidate.reason }}</span>{% endif %}
+              <p class="message" data-candidate-message role="status" aria-live="polite"></p>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if line.rule_suggestion %}
+        <p class="line-source" data-rule-suggestion>{{ line.rule_suggestion }}. Suggestion only; choose a disposition to approve.</p>
+        {% endif %}
+        {% if line.package_review_warning %}
+        <p class="line-source" data-package-warning>Package count, size, or unit is missing. Keep as a draft; ingredient and stocked-supply approval is blocked.</p>
+        {% endif %}
+        {% if not line.is_excluded %}
+        <form class="review-controls" data-approval-form data-receipt-id="{{ receipt.receipt_pk }}"
+            data-line-id="{{ line.id }}" data-store-item-id="{{ line.store_item_id or '' }}"
+            {% if line.approved and line.posting_kind == "DIRECT_EXPENSE" and line.posting_status == "ROUTED" %}data-reroute="true"{% endif %}>
+          <label>Business disposition
+            <select name="disposition" {% if line.approved %}disabled{% endif %}>
+              {% for disposition in dispositions %}
+              <option value="{{ disposition }}" {% if disposition == line.business_disposition %}selected{% endif %}>
+                {{ disposition.replace("_", " ").title() }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Subtype
+            <select name="disposition_subtype" {% if (line.approved and line.posting_kind != "DIRECT_EXPENSE") or line.business_disposition != "ORDINARY_BUSINESS_PURCHASE" %}disabled{% endif %}>
+              {% for subtype in ["NONE", "DIRECT_EXPENSE", "STOCKED_SUPPLY", "DIRECT_SELL_RESTOCK"] %}
+              <option value="{{ subtype }}" {% if subtype == line.disposition_subtype %}selected{% endif %}>
+                {{ subtype.replace("_", " ").title() }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          {% if line.approved %}
+            {% if line.posting_kind == "DIRECT_EXPENSE" and line.posting_status == "ROUTED" %}
+          <label>Reason for reroute
+            <input name="reason" required minlength="1" maxlength="2000">
+          </label>
+          <button type="submit">Request reroute</button>
+            {% else %}
+          <button type="button" disabled>Approved</button>
+            {% endif %}
+          {% else %}
+          <button type="submit" {% if not line.mapping_confirmed %}disabled{% endif %}>Approve line</button>
+          {% endif %}
+        </form>
+        {% endif %}
+        <p class="message" role="status" aria-live="polite"></p>
+      </article>
+      {% else %}
+      <p>No lines to review.</p>
+      {% endfor %}
+      {% if not corrections_locked and can_add_line %}
+      <form class="correction-form" data-line-addition-form data-receipt-id="{{ receipt.receipt_pk }}"
+        data-manual="{{ 'true' if receipt.source_type == 'MANUAL' else 'false' }}">
+        <h2>Add missed line</h2>
+        <div class="correction-fields">
+          <label>Description<input name="description" required maxlength="255"></label>
+          <label>Store product identifier<input name="store_product_id" maxlength="255"></label>
+          <label>Package count<input name="package_count" type="number" min="0" step="any" required></label>
+          <label>Pack size<input name="pack_size" type="number" min="0" step="any"></label>
+          <label>Pack unit<input name="pack_unit" data-addition-pack-unit list="addition-unit-aliases">
+            <datalist id="addition-unit-aliases">{% for alias in unit_aliases %}<option value="{{ alias }}">{% endfor %}</datalist>
+            <span data-addition-unit-suggestion hidden></span>
+            <button type="button" data-confirm-addition-unit hidden></button>
+          </label>
+          <label>Unit price<input name="unit_price" type="number" min="0" step="0.01" required></label>
+          <label><span>Repeated product confirmation</span>
+            <span><input name="confirm_repeated_occurrence" type="checkbox"> Confirm this is a distinct purchase occurrence</span>
+          </label>
+          <label><span>Package default</span>
+            <span><input name="remember_package_as_default" type="checkbox"> Remember this size/unit for this store item</span>
+          </label>
+          {% if sources %}
+          <label>Source
+            <select name="source_id" required>
+              <option value="">Select source</option>
+              {% for source in sources if source.kind in ["PRIMARY", "SUPPLEMENT"] %}
+              <option value="{{ source.id }}">{{ source.kind }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Source page<input name="source_page" type="number" min="1" value="1" required></label>
+          <label>Source line<input name="source_line_number" type="number" min="1" required></label>
+          {% endif %}
+          <label>Calculated line total<output data-addition-line-total>0.00</output></label>
+        </div>
+        <label>Reason<textarea name="reason" required minlength="1" maxlength="2000"></textarea></label>
+        <button type="submit">Add line</button>
+        <button type="button" data-refresh-review hidden>Refresh review</button>
+        <p class="message" role="status" aria-live="polite"></p>
+      </form>
+      {% endif %}
+    </section>
+    </div>
+  </main>
+  <dialog data-image-replacement-dialog>
+    <form method="dialog">
+      <p>Replace the current image?</p>
+      <div class="candidate-actions">
+        <button value="no" autofocus>Keep current primary</button>
+        <button value="yes">Replace primary</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    (() => {
+      function csrfToken() {
+        return document.cookie.split(";").map((part) => part.trim())
+          .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
+      }
+      function eventId() {
+        return globalThis.crypto?.randomUUID?.()
+          ?? `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+      const unitAliases = {{ unit_aliases | tojson }};
+      function editDistance(left, right) {
+        const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+        for (let row = 1; row <= left.length; row += 1) {
+          const current = [row];
+          for (let column = 1; column <= right.length; column += 1) {
+            current[column] = Math.min(
+              current[column - 1] + 1,
+              previous[column] + 1,
+              previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1),
+            );
+          }
+          previous.splice(0, previous.length, ...current);
+        }
+        return previous[right.length];
+      }
+      function bindUnitAliasControl(field, suggestion, confirmButton) {
+        field.addEventListener("input", () => {
+          const normalized = field.value.trim().toLowerCase().replace(/\s+/g, " ");
+          const exact = unitAliases[normalized];
+          if (exact) {
+            field.value = exact;
+            suggestion.hidden = true;
+            confirmButton.hidden = true;
+            return;
+          }
+          const nearest = Object.keys(unitAliases)
+            .map((alias) => ({ alias, distance: editDistance(normalized, alias) }))
+            .sort((left, right) => left.distance - right.distance)[0];
+          const fuzzy = nearest && nearest.distance <= Math.max(1, Math.floor(normalized.length / 4))
+            ? unitAliases[nearest.alias]
+            : null;
+          suggestion.hidden = !fuzzy;
+          confirmButton.hidden = !fuzzy;
+          if (fuzzy) {
+            suggestion.textContent = `Did you mean ${fuzzy}?`;
+            confirmButton.textContent = `Use ${fuzzy}`;
+            confirmButton.dataset.unit = fuzzy;
+          }
+        });
+        confirmButton.addEventListener("click", () => {
+          field.value = confirmButton.dataset.unit;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+      }
+      document.querySelectorAll("[data-correction-form]").forEach((form) => {
+        const message = form.querySelector("[role='status']");
+        const submitButtons = form.querySelectorAll("button[type='submit']");
+        function setSubmitDisabled(disabled) {
+          submitButtons.forEach((button) => { button.disabled = disabled; });
+        }
+        const lineTotal = form.querySelector("[data-calculated-line-total]");
+        if (lineTotal) {
+          for (const fieldName of ["package_count", "unit_price"]) {
+            form.elements[fieldName].addEventListener("input", () => {
+              const packageCount = Number(form.elements.package_count.value);
+              const unitPrice = Number(form.elements.unit_price.value);
+              if (form.elements.package_count.value && form.elements.unit_price.value) {
+                lineTotal.textContent = (packageCount * unitPrice).toFixed(2);
+              }
+            });
+          }
+        }
+        const unitField = form.querySelector("[data-pack-unit]");
+        if (unitField) {
+          const suggestion = form.querySelector("[data-unit-suggestion]");
+          const confirmUnit = form.querySelector("[data-confirm-unit]");
+            bindUnitAliasControl(unitField, suggestion, confirmUnit);
+        }
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const itemIndex = form.dataset.itemIndex;
+          const excluding = event.submitter?.name === "exclude_line";
+          const changes = itemIndex === undefined ? {} : { [itemIndex]: {} };
+          const target = itemIndex === undefined ? changes : changes[itemIndex];
+          for (const field of form.querySelectorAll("[data-correction-field]")) {
+            if (field.value !== field.dataset.initial) {
+              target[field.name] = field.value === "" ? null : field.value;
+            }
+          }
+          const hasChanges = Object.keys(changes).some((key) =>
+            itemIndex === undefined || Object.keys(changes[key]).length > 0
+          );
+          if (!hasChanges && !excluding) {
+            message.textContent = "Make a change before saving.";
+            message.dataset.error = "true";
+            return;
+          }
+          const requestPayload = {
+            reason: form.elements.reason.value,
+            ...(itemIndex === undefined
+              ? { header_updates: changes }
+              : { item_updates: changes }),
+            ...(excluding ? { item_exclusions: [Number(event.submitter.value)] } : {}),
+            ...(form.elements.remember_package_default?.checked
+              ? { remember_package_default_indexes: [Number(itemIndex)] }
+              : {}),
+          };
+          const requestFingerprint = JSON.stringify(requestPayload);
+          if (form.dataset.sourceEventPayload !== requestFingerprint) {
+            form.dataset.sourceEventId = eventId();
+            form.dataset.sourceEventPayload = requestFingerprint;
+          }
+          const body = { ...requestPayload, source_event_id: form.dataset.sourceEventId };
+          setSubmitDisabled(true);
+          try {
+            const response = await fetch(
+              `/api/v1/receipts/${encodeURIComponent(form.dataset.receiptId)}/corrections`,
+              {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+                body: JSON.stringify(body),
+              },
+            );
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail ?? "Correction failed");
+            message.textContent = result.status === "UPDATED"
+              ? `Saved version ${result.document_version}`
+              : "Correction held for administrator review.";
+            message.dataset.error = "false";
+            if (result.status === "UPDATED") {
+              form.dataset.sourceEventId = "";
+              form.dataset.sourceEventPayload = "";
+              form.querySelectorAll("[data-correction-field]").forEach((field) => {
+                field.dataset.initial = field.value;
+              });
+              form.elements.reason.value = "";
+              setSubmitDisabled(false);
+              if (excluding) window.location.reload();
+            } else {
+              setSubmitDisabled(true);
+            }
+          } catch (error) {
+            message.textContent = error.message;
+            message.dataset.error = "true";
+            setSubmitDisabled(false);
+          }
+        });
+      });
+      document.querySelectorAll("[data-line-addition-form]").forEach((form) => {
+        const packageCount = form.elements.package_count;
+        const unitPrice = form.elements.unit_price;
+        const lineTotal = form.querySelector("[data-addition-line-total]");
+        form.querySelector("[data-refresh-review]").addEventListener("click", () => {
+          window.location.reload();
+        });
+        const updateLineTotal = () => {
+          if (packageCount.value && unitPrice.value) {
+            lineTotal.textContent = (Number(packageCount.value) * Number(unitPrice.value)).toFixed(2);
+          }
+        };
+        packageCount.addEventListener("input", updateLineTotal);
+        unitPrice.addEventListener("input", updateLineTotal);
+        const packUnit = form.elements.pack_unit;
+        const rememberDefault = form.elements.remember_package_as_default;
+        const storeProductId = form.elements.store_product_id;
+        const updateRememberAvailability = () => {
+          rememberDefault.disabled = form.dataset.manual !== "true" && !storeProductId.value.trim();
+        };
+        if (storeProductId) {
+          storeProductId.addEventListener("input", updateRememberAvailability);
+          updateRememberAvailability();
+        }
+        const unitSuggestion = form.querySelector("[data-addition-unit-suggestion]");
+        const confirmUnit = form.querySelector("[data-confirm-addition-unit]");
+        bindUnitAliasControl(packUnit, unitSuggestion, confirmUnit);
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const message = form.querySelector("[role='status']");
+          const submitButton = form.querySelector("button[type='submit']");
+          const sourceId = form.elements.source_id?.value;
+          const requestPayload = {
+            reason: form.elements.reason.value,
+            item_additions: [{
+              description: form.elements.description.value,
+              category: "Other",
+              store_product_id: form.elements.store_product_id.value || null,
+              package_count: packageCount.value,
+              pack_size: form.elements.pack_size.value || null,
+              pack_unit: packUnit.value,
+              unit_price: unitPrice.value,
+              ...(sourceId ? {
+                source_id: Number(sourceId),
+                source_page: Number(form.elements.source_page.value),
+                source_line_number: Number(form.elements.source_line_number.value),
+              } : {}),
+                confirm_repeated_occurrence: form.elements.confirm_repeated_occurrence.checked,
+                remember_package_as_default: rememberDefault.checked,
+            }],
+          };
+          const fingerprint = JSON.stringify(requestPayload);
+          if (form.dataset.sourceEventPayload !== fingerprint) {
+            form.dataset.sourceEventId = eventId();
+            form.dataset.sourceEventPayload = fingerprint;
+          }
+          submitButton.disabled = true;
+          try {
+            const response = await fetch(
+              `/api/v1/receipts/${encodeURIComponent(form.dataset.receiptId)}/corrections`,
+              {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+                body: JSON.stringify({
+                  ...requestPayload,
+                  source_event_id: form.dataset.sourceEventId,
+                }),
+              },
+            );
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail ?? "Line addition failed");
+            message.textContent = `Added line in version ${result.document_version}`;
+            message.dataset.error = "false";
+            form.querySelector("[data-refresh-review]").hidden = false;
+          } catch (error) {
+            message.textContent = error.message;
+            message.dataset.error = "true";
+            submitButton.disabled = false;
+          }
+        });
+      });
+      document.querySelectorAll("[data-approval-form]").forEach((form) => {
+        const disposition = form.elements.disposition;
+        const subtype = form.elements.disposition_subtype;
+        disposition.addEventListener("change", () => {
+          const ordinary = disposition.value === "ORDINARY_BUSINESS_PURCHASE";
+          subtype.disabled = !ordinary;
+          if (!ordinary) subtype.value = "NONE";
+        });
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const line = form.closest(".line");
+          const message = line.querySelector(".message");
+          const reroute = form.dataset.reroute === "true";
+          const path = `/api/v1/receipts/${encodeURIComponent(form.dataset.receiptId)}`
+            + `/items/${encodeURIComponent(form.dataset.lineId)}/${reroute ? "reroute" : "approval"}`;
+          try {
+            const response = await fetch(path, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+              body: JSON.stringify({
+                disposition: disposition.value,
+                disposition_subtype: subtype.value,
+                source_event_id: eventId(),
+                ...(reroute ? { reason: form.elements.reason.value } : {}),
+              }),
+            });
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.detail ?? "Approval failed");
+            line.dataset.approved = "true";
+            let status = line.querySelector(".line-head .status");
+            if (!status) {
+              status = document.createElement("strong");
+              status.className = "status";
+              line.querySelector(".line-head").append(status);
+            }
+            status.textContent = body.posting_status;
+            disposition.disabled = true;
+            subtype.disabled = true;
+            form.querySelector("button[type='submit']").disabled = true;
+            form.querySelector("button[type='submit']").textContent = reroute ? "Held for review" : "Approved";
+            message.textContent = reroute ? `Held: ${body.posting_kind}` : `Routing ${body.posting_kind}`;
+            message.dataset.error = "false";
+            if (body.remembered_rule_differs && form.dataset.storeItemId
+                && window.confirm("This item has a different saved classification. Update the saved rule to this choice?")) {
+              const ruleResponse = await fetch(
+                `/api/v1/remembered-rules/${encodeURIComponent(form.dataset.storeItemId)}`,
+                {
+                  method: "PUT",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+                  body: JSON.stringify({
+                    disposition: body.disposition,
+                    disposition_subtype: body.disposition_subtype,
+                    reason: "Updated from receipt review",
+                  }),
+                },
+              );
+              message.textContent += ruleResponse.ok ? " Saved rule updated." : " Saved rule was not updated.";
+            }
+          } catch (error) {
+            message.textContent = error.message;
+            message.dataset.error = "true";
+          }
+        });
+      });
+      const viewer = document.querySelector("[data-source-viewer]");
+      if (viewer) {
+        const selector = viewer.querySelector("[data-source-select]");
+        const frame = viewer.querySelector("[data-source-frame]");
+        const image = viewer.querySelector("[data-source-image]");
+        const pageInput = viewer.querySelector("[data-page-number]");
+        const pageCount = viewer.querySelector("[data-page-count]");
+        const state = viewer.querySelector("[data-source-state]");
+        const zoomInput = viewer.querySelector("[data-source-zoom]");
+        const rotateButton = viewer.querySelector("[data-source-rotate]");
+        let maxPage = Number(selector.selectedOptions[0].dataset.pageCount) || 1;
+        let rotation = 0;
+        function applyViewTransform() {
+          const zoom = Number(zoomInput.value) / 100;
+          const transform = `scale(${zoom}) rotate(${rotation}deg)`;
+          frame.style.transform = transform;
+          image.style.transform = transform;
+          frame.style.transformOrigin = "center center";
+          image.style.transformOrigin = "center center";
+        }
+        function showSource() {
+          const option = selector.selectedOptions[0];
+          const mediaType = option.dataset.mediaType;
+          const sourceUrl = option.dataset.contentUrl;
+          maxPage = Number(option.dataset.pageCount) || 1;
+          pageInput.max = String(maxPage);
+          pageInput.value = "1";
+          pageCount.textContent = `of ${maxPage}`;
+          state.textContent = option.dataset.kind;
+          if (mediaType === "application/pdf") {
+            frame.hidden = false;
+            image.hidden = true;
+            frame.src = `${sourceUrl}#page=1`;
+          } else {
+            frame.hidden = true;
+            image.hidden = false;
+            image.src = sourceUrl;
+          }
+        }
+        function showPage() {
+          const pageNumber = Math.max(1, Math.min(maxPage, Number(pageInput.value) || 1));
+          pageInput.value = String(pageNumber);
+          if (!frame.hidden) {
+            frame.src = `${selector.selectedOptions[0].dataset.contentUrl}#page=${pageNumber}`;
+          }
+        }
+        selector.addEventListener("change", showSource);
+        pageInput.addEventListener("change", showPage);
+        zoomInput.addEventListener("input", applyViewTransform);
+        rotateButton.addEventListener("click", () => {
+          rotation = (rotation + 90) % 360;
+          rotateButton.dataset.rotation = String(rotation);
+          applyViewTransform();
+        });
+        viewer.querySelector("[data-page-previous]").addEventListener("click", () => {
+          pageInput.value = String(Math.max(1, Number(pageInput.value) - 1));
+          showPage();
+        });
+        viewer.querySelector("[data-page-next]").addEventListener("click", () => {
+          pageInput.value = String(Math.min(maxPage, Number(pageInput.value) + 1));
+          showPage();
+        });
+        viewer.querySelectorAll("[data-source-decision]").forEach((form) => {
+          const decision = form.elements.decision;
+          const repeatConfirmations = form.querySelectorAll(
+            "input[name='confirmed_repeated_line_indexes']"
+          );
+          function updateRepeatConfirmationAvailability() {
+            repeatConfirmations.forEach((checkbox) => {
+              checkbox.disabled = decision.value !== "SUPPLEMENT";
+            });
+          }
+          decision.addEventListener("change", updateRepeatConfirmationAvailability);
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const message = form.querySelector("[role='status']");
+            const sourceId = encodeURIComponent(form.dataset.sourceId);
+            const receiptId = encodeURIComponent(form.dataset.receiptId);
+            const submitButton = form.querySelector("button[type='submit']");
+            const requestPayload = {
+              decision: form.elements.decision.value,
+              reason: form.elements.reason.value,
+              confirmed_repeated_line_indexes: Array.from(repeatConfirmations)
+                .filter((checkbox) => checkbox.checked)
+                .map((checkbox) => Number(checkbox.value)),
+            };
+            const requestFingerprint = JSON.stringify(requestPayload);
+            if (form.dataset.sourceEventPayload !== requestFingerprint) {
+              form.dataset.sourceEventId = eventId();
+              form.dataset.sourceEventPayload = requestFingerprint;
+            }
+            const sourceEventId = form.dataset.sourceEventId;
+            submitButton.disabled = true;
+            try {
+              const response = await fetch(
+                `/api/v1/receipts/${receiptId}/sources/${sourceId}/decision`,
+                {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+                  body: JSON.stringify({
+                    ...requestPayload,
+                    source_event_id: sourceEventId,
+                  }),
+                },
+              );
+              const body = await response.json();
+              if (!response.ok) throw new Error(body.detail ?? "Source decision failed");
+              form.dataset.sourceEventId = "";
+              form.dataset.sourceEventPayload = "";
+              message.textContent = body.held ? body.hold_reason : `Saved ${body.association_kind}`;
+              if (!body.held) {
+                const option = selector.querySelector(`option[value="${sourceId}"]`);
+                option.dataset.kind = body.association_kind;
+                option.textContent = `${body.association_kind} · ${option.dataset.mediaType}`;
+                if (selector.value === sourceId) state.textContent = body.association_kind;
+                form.elements.decision.disabled = true;
+                form.elements.reason.disabled = true;
+                submitButton.disabled = true;
+                if (body.association_kind === "SUPPLEMENT") window.location.reload();
+              } else {
+                submitButton.disabled = false;
+              }
+            } catch (error) {
+              message.textContent = error.message;
+              submitButton.disabled = false;
+            }
+          });
+        });
+      }
+      const replacementDialog = document.querySelector("[data-image-replacement-dialog]");
+      let pendingReplacement = null;
+      async function sendImageCandidateDecision(form, payload) {
+        const message = form.querySelector("[data-candidate-message]");
+        try {
+          const response = await fetch(
+            `/api/v1/receipts/${encodeURIComponent(form.dataset.receiptId)}`
+              + `/image-candidates/${encodeURIComponent(form.dataset.candidateId)}/decision`,
+            {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+              body: JSON.stringify(payload),
+            },
+          );
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail ?? "Image candidate decision failed");
+          if (body.replace_prompt_required) {
+            pendingReplacement = { form, payload };
+            replacementDialog.showModal();
+            return;
+          }
+          message.textContent = body.status === "REJECTED"
+            ? "Image candidate rejected" : "Image candidate confirmed";
+          message.dataset.error = "false";
+          form.querySelectorAll("[data-candidate-confirm], [data-candidate-reject]")
+            .forEach((button) => { button.disabled = true; });
+          form.querySelector("strong").textContent = body.status;
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      }
+      document.querySelectorAll("[data-image-candidate]").forEach((form) => {
+        form.querySelector("[data-candidate-confirm]")?.addEventListener("click", () => {
+          const lineSelector = form.querySelector("[data-candidate-line]");
+          const receiptItemId = form.dataset.lineId
+            ? Number(form.dataset.lineId)
+            : Number(lineSelector?.value || 0);
+          const message = form.querySelector("[data-candidate-message]");
+          if (!receiptItemId) {
+            message.textContent = "Choose a receipt line first";
+            message.dataset.error = "true";
+            return;
+          }
+          sendImageCandidateDecision(form, {
+            decision: "CONFIRM",
+            receipt_item_id: receiptItemId,
+          });
+        });
+        form.querySelector("[data-candidate-reject]")?.addEventListener("click", () => {
+          const reason = form.querySelector("[data-rejection-reason]").value.trim();
+          const message = form.querySelector("[data-candidate-message]");
+          if (!reason) {
+            message.textContent = "A rejection reason is required";
+            message.dataset.error = "true";
+            return;
+          }
+          sendImageCandidateDecision(form, { decision: "REJECT", reason });
+        });
+      });
+      replacementDialog.addEventListener("close", () => {
+        if (pendingReplacement === null) return;
+        const { form, payload } = pendingReplacement;
+        pendingReplacement = null;
+        sendImageCandidateDecision(form, {
+          ...payload,
+          replace_primary: replacementDialog.returnValue === "yes",
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

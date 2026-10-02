@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Remembered Rules | Market Business System</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f3f6f4; color: #182521; }
+    main { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    h1 { margin: 0 0 .3rem; font-size: 1.75rem; }
+    .lede { color: #52635c; margin: 0 0 1.25rem; }
+    .rule { background: #fff; border: 1px solid #d4ded8; border-radius: 6px; padding: 1rem; margin-bottom: .75rem; }
+    .rule h2 { margin: 0; font-size: 1.05rem; }
+    .meta { color: #52635c; margin: .3rem 0 .8rem; }
+    .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto; gap: .65rem; align-items: end; }
+    label { display: grid; gap: .3rem; font-weight: 600; }
+    select, input, button { min-width: 0; padding: .55rem .65rem; border: 1px solid #9eafa6; border-radius: 4px; font: inherit; }
+    button { background: #fff; color: #18372c; cursor: pointer; }
+    button:hover { background: #e6efe9; }
+    .message { min-height: 1.25rem; margin: .6rem 0 0; color: #286143; }
+    .message[data-error="true"] { color: #a2312c; }
+    @media (max-width: 760px) {
+      main { padding: 1rem .7rem 2rem; }
+      .controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Remembered Rules</h1>
+    <p class="lede">Saved classifications are suggestions. A line can always be classified differently, and no rule approves a line.</p>
+    {% for rule in rules %}
+    <article class="rule" data-store-item-id="{{ rule.store_item_id }}">
+      <h2>{{ rule.description }}</h2>
+      <div class="meta">{{ rule.store_name }} · {{ rule.store_product_id }}{% if rule.upc %} · UPC {{ rule.upc }}{% endif %}</div>
+      <form class="controls" data-rule-form>
+        <label>Disposition
+          <select name="disposition">
+            {% for disposition in dispositions %}
+            <option value="{{ disposition }}" {% if disposition == rule.disposition %}selected{% endif %}>{{ disposition.replace("_", " ").title() }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Subtype
+          <select name="disposition_subtype">
+            {% for subtype in ["NONE", "DIRECT_EXPENSE", "STOCKED_SUPPLY", "DIRECT_SELL_RESTOCK"] %}
+            <option value="{{ subtype }}" {% if subtype == rule.disposition_subtype %}selected{% endif %}>{{ subtype.replace("_", " ").title() }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Reason
+          <input name="reason" maxlength="2000" required>
+        </label>
+        <button type="submit">Save rule</button>
+        <button type="button" data-clear-rule>Clear rule</button>
+      </form>
+      <p class="message" role="status" aria-live="polite"></p>
+    </article>
+    {% else %}
+    <p>No remembered rules yet. Approving a receipt line remembers its classification.</p>
+    {% endfor %}
+  </main>
+  <script>
+    function csrfToken() {
+      return document.cookie.split(";").map((part) => part.trim())
+        .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
+    }
+
+    async function ruleRequest(method, id, payload) {
+      const response = await fetch(`/api/v1/remembered-rules/${encodeURIComponent(id)}`, {
+        method,
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Rule update failed");
+      return body;
+    }
+
+    document.querySelectorAll(".rule").forEach((card) => {
+      const form = card.querySelector("[data-rule-form]");
+      const message = card.querySelector(".message");
+      const disposition = form.elements.disposition;
+      const subtype = form.elements.disposition_subtype;
+      function syncSubtype() {
+        const ordinary = disposition.value === "ORDINARY_BUSINESS_PURCHASE";
+        subtype.disabled = !ordinary;
+        if (!ordinary) subtype.value = "NONE";
+      }
+      disposition.addEventListener("change", syncSubtype);
+      syncSubtype();
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          const body = await ruleRequest("PUT", card.dataset.storeItemId, {
+            disposition: disposition.value,
+            disposition_subtype: subtype.value,
+            reason: form.elements.reason.value,
+          });
+          message.textContent = body.changed ? "Rule saved" : "Rule unchanged";
+          message.dataset.error = "false";
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+      card.querySelector("[data-clear-rule]").addEventListener("click", async () => {
+        const reason = form.elements.reason.value.trim();
+        if (!reason) {
+          message.textContent = "A reason is required";
+          message.dataset.error = "true";
+          return;
+        }
+        try {
+          await ruleRequest("DELETE", card.dataset.storeItemId, { reason });
+          card.remove();
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

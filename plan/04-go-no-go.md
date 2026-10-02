@@ -220,7 +220,7 @@ Credentials must be typed directly into `.env` files or secret stores. Never pas
 
 Every slice follows the same template:
 - **Scope:** the steps listed.
-- **Evidence:** named focused tests and applicable manifest IDs pass on disposable PostgreSQL databases, then Ruff, strict mypy, full pytest/Chromium and migration tests run in the dedicated `test` image, never the production web image. Use `docker compose run --rm --build test` and focused `docker compose run --rm test pytest <tests> -q`; host lint/type checks remain permitted. Record commands/environment/results, never infer coverage from planned IDs or a skipped database test.
+- **Evidence:** follow the [fast-development contract](00-overview.md#fast-test-development-contract-all-stages): focused `docker compose run --rm test-dev pytest <tests> -q`, then mounted Ruff/strict mypy/full PostgreSQL suite for working-tree evidence. Candidate/CI evidence uses rebuilt unmounted `test` images and required profiles/migrations, never the production web image. Keep manifest candidate commands unchanged; record both contexts, rebuild reasons and skips. A mounted run cannot certify an image, and speed never waives database/browser/full-suite or D-00 gates.
 - **Review gate (D-00):** after validation passes, critically review everything the slice touched, fix every finding, re-run validation, and record the findings and fixes in the slice evidence. Ask before moving on when a finding has no clear answer.
 - **Stop conditions:** a decision not covered by §5, a review finding with no clear answer, a user-only action, or a failure the agent cannot fix after diagnosis.
 

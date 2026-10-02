@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manual Receipt | Market Business System</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f4f6f2; color: #1d2924; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    h1 { margin: 0 0 1rem; font-size: 1.8rem; }
+    h2 { margin: 1.5rem 0 .75rem; font-size: 1.2rem; }
+    .header-fields, .line-fields { display: grid; gap: .7rem; }
+    .header-fields { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+    .line-list { display: grid; gap: .8rem; }
+    .line { padding: .8rem; border: 1px solid #d2dbd4; border-radius: 5px; background: #fff; }
+    .line-fields { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    input, select, button { min-width: 0; padding: .55rem .65rem; border: 1px solid #a6b3aa; border-radius: 4px; font: inherit; }
+    button { width: fit-content; background: #fff; color: #18392b; cursor: pointer; }
+    button:hover { background: #e7efe9; }
+    .commands { display: flex; gap: .65rem; margin-top: 1rem; flex-wrap: wrap; }
+    .message { min-height: 1.3rem; color: #286143; }
+    .message[data-error="true"] { color: #a2312c; }
+    @media (max-width: 540px) {
+      main { padding: 1rem .7rem 2rem; }
+      .line-fields { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 380px) { .line-fields { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Manual Receipt</h1>
+    <form id="manual-receipt">
+      <div class="header-fields">
+        <label>Store
+          <select name="store_id" required>
+            <option value="">Select store</option>
+            {% for store in stores %}
+            <option value="{{ store.store_id }}">{{ store.display_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Purchase date<input name="receipt_date" type="date" required></label>
+        <label>Vendor reference<input name="vendor_reference" maxlength="100"></label>
+        <label>Purchase time<input name="receipt_time" type="time"></label>
+        <label>Subtotal<input name="subtotal" type="number" min="0" step="0.01"></label>
+        <label>Tax<input name="tax" type="number" min="0" step="0.01"></label>
+        <label>Total<input name="total" type="number" min="0" step="0.01" required></label>
+        <label>Payment method<input name="payment_method" maxlength="50"></label>
+      </div>
+      <h2>Line Items</h2>
+      <div class="line-list" id="line-list"></div>
+      <div class="commands">
+        <button type="button" id="add-line">Add line</button>
+        <button type="submit">Create receipt</button>
+      </div>
+      <p class="message" role="status" aria-live="polite"></p>
+      <ul class="created-identifiers" aria-label="Created item identifiers"></ul>
+      <a class="review-link" hidden></a>
+    </form>
+  </main>
+  <template id="line-template">
+    <section class="line" data-line>
+      <div class="line-fields">
+        <label>Description<input name="description" maxlength="255" required></label>
+        <label>Merchant product ID<input name="store_product_id" maxlength="255"></label>
+        <label>UPC<input name="upc" maxlength="50"></label>
+        <label>Quantity<input name="quantity" type="number" min="0.0001" step="0.0001"></label>
+        <label>Unit price<input name="unit_price" type="number" min="0" step="0.01"></label>
+        <label>Line total<input name="line_total" type="number" min="0" step="0.01" required></label>
+        <label>Category<input name="category" maxlength="50" value="Other" required></label>
+        <label>Disposition
+          <select name="business_disposition" required>
+            <option value="UNCLASSIFIED">Unclassified</option>
+            <option value="PERSONAL_NON_BUSINESS">Personal / Non-business</option>
+            <option value="ORDINARY_BUSINESS_PURCHASE">Ordinary Business Purchase</option>
+            <option value="RECIPE_INGREDIENT">Recipe Ingredient</option>
+            <option value="CAPITAL_ASSET_EQUIPMENT">Capital Asset / Equipment</option>
+          </select>
+        </label>
+        <label>Disposition subtype
+          <select name="disposition_subtype" required>
+            <option value="NONE">None</option>
+            <option value="DIRECT_EXPENSE">Direct expense</option>
+            <option value="STOCKED_SUPPLY">Stocked supply</option>
+            <option value="DIRECT_SELL_RESTOCK">Direct sell restock</option>
+          </select>
+        </label>
+        <button type="button" data-remove-line>Remove line</button>
+      </div>
+    </section>
+  </template>
+  <script>
+    (() => {
+    function csrfToken() {
+      return document.cookie.split(";").map((part) => part.trim())
+        .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
+    }
+
+    function newEventId() {
+      return globalThis.crypto?.randomUUID?.()
+        ?? `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    const lineList = document.querySelector("#line-list");
+    const lineTemplate = document.querySelector("#line-template");
+    document.querySelector("#add-line").addEventListener("click", () => {
+      const line = lineTemplate.content.firstElementChild.cloneNode(true);
+      const disposition = line.querySelector("[name='business_disposition']");
+      const subtype = line.querySelector("[name='disposition_subtype']");
+      disposition.addEventListener("change", () => {
+        const ordinary = disposition.value === "ORDINARY_BUSINESS_PURCHASE";
+        subtype.disabled = !ordinary;
+        if (!ordinary) subtype.value = "NONE";
+      });
+      subtype.disabled = disposition.value !== "ORDINARY_BUSINESS_PURCHASE";
+      line.querySelector("[data-remove-line]").addEventListener("click", () => line.remove());
+      lineList.append(line);
+    });
+    document.querySelector("#add-line").click();
+
+    const receiptDate = document.querySelector("input[name='receipt_date']");
+    const today = new Date();
+    receiptDate.value = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0")].join("-");
+
+    document.querySelector("#manual-receipt").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const values = new FormData(form);
+      const lines = [...lineList.querySelectorAll("[data-line]")].map((line) => {
+        const value = (name) => line.querySelector(`[name='${name}']`).value;
+        return {
+          description: value("description"),
+          store_product_id: value("store_product_id") || null,
+          upc: value("upc") || null,
+          quantity: value("quantity") || null,
+          unit_price: value("unit_price") || null,
+          line_total: value("line_total"),
+          category: value("category"),
+          business_disposition: value("business_disposition"),
+          disposition_subtype: value("disposition_subtype"),
+        };
+      });
+      const payload = {
+        source_event_id: form.dataset.sourceEventId || (form.dataset.sourceEventId = newEventId()),
+        store_id: values.get("store_id"),
+        receipt_date: values.get("receipt_date"),
+        vendor_reference: values.get("vendor_reference") || null,
+        receipt_time: values.get("receipt_time") || null,
+        subtotal: values.get("subtotal") || null,
+        tax: values.get("tax") || null,
+        total: values.get("total"),
+        payment_method: values.get("payment_method") || null,
+        items: lines,
+      };
+      const message = form.querySelector(".message");
+      try {
+        const response = await fetch("/api/v1/receipts/manual", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail ?? "Receipt could not be created");
+        message.textContent = `Receipt ${result.receipt_id} created`;
+        message.dataset.error = "false";
+        const reviewLink = form.querySelector(".review-link");
+        reviewLink.href = `/api/v1/receipts/${encodeURIComponent(result.receipt_pk)}/review`;
+        reviewLink.textContent = "Review receipt";
+        reviewLink.hidden = false;
+        const identifiers = form.querySelector(".created-identifiers");
+        identifiers.replaceChildren();
+        for (const item of result.items) {
+          if (item.identifier_source !== "MANUAL") continue;
+          const entry = document.createElement("li");
+          entry.textContent = `${item.description}: Manual identifier ${item.store_product_id}`;
+          identifiers.append(entry);
+        }
+        form.dataset.sourceEventId = newEventId();
+      } catch (error) {
+        message.textContent = error.message;
+        message.dataset.error = "true";
+      }
+    });
+    })();
+  </script>
+</body>
+</html>

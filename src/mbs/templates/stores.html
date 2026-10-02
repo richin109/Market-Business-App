@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stores | Market Business System</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f5f7f9; color: #18212b; }
+    main { max-width: 1100px; margin: 0 auto; padding: 2rem 1rem; }
+    h1 { margin: 0 0 .35rem; }
+    .lede { color: #52606d; margin: 0 0 1.5rem; }
+    .store-list { display: grid; gap: 1rem; }
+    .store { background: white; border: 1px solid #d9e0e7; border-radius: 8px; padding: 1rem; }
+    .store-header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+    .store-name { margin: 0; font-size: 1.15rem; }
+    .inactive { color: #7b8794; }
+    .meta { color: #52606d; display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; margin: .75rem 0; }
+    .aliases { margin: .5rem 0 0; padding-left: 1.25rem; }
+    .alias-key { color: #52606d; font-family: ui-monospace, monospace; }
+    .store-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; margin-top: 1rem; }
+    .grouping-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .75rem; margin-top: .75rem; padding-top: .75rem; border-top: 1px solid #e1e7eb; }
+    fieldset { min-width: 0; margin: 0; padding: .5rem; border: 1px solid #aeb9c4; border-radius: 4px; }
+    fieldset label { display: flex; align-items: center; gap: .4rem; font-weight: 400; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    input { min-width: 0; padding: .55rem; border: 1px solid #aeb9c4; border-radius: 4px; font: inherit; }
+    button { justify-self: start; padding: .55rem .8rem; border: 1px solid #596b7a; border-radius: 4px; background: #fff; color: #18212b; font: inherit; cursor: pointer; }
+    button:hover { background: #eaf0f4; }
+    .store-message { min-height: 1.25rem; margin: .75rem 0 0; color: #285d45; }
+    .store-message[data-error="true"] { color: #a32d27; }
+    @media (max-width: 600px) {
+      main { padding: 1.25rem .75rem; }
+      .store-header { display: block; }
+      .status { display: inline-block; margin-top: .5rem; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Stores</h1>
+    <p class="lede">Canonical stores and the exact source spellings that resolve to them.</p>
+    <section class="store-list" aria-label="Canonical stores">
+      {% for store in stores %}
+      <article class="store" data-store-id="{{ store.store_id }}">
+        <div class="store-header">
+          <h2 class="store-name">{{ store.display_name }}</h2>
+          <span class="status{% if not store.is_active %} inactive{% endif %}">
+            {{ "Active" if store.is_active else "Inactive" }}
+          </span>
+        </div>
+        <div class="meta">
+          <span>{{ store.alias_count }} aliases</span>
+          <span>{{ store.receipt_count }} receipts</span>
+          <span>Last purchase: {{ store.last_purchase_date or "None" }}</span>
+        </div>
+        <ul class="aliases">
+          {% for alias in store.aliases %}
+          <li>{{ alias.raw_alias }} <span class="alias-key">({{ alias.normalized_key }})</span></li>
+          {% else %}
+          <li>No aliases recorded</li>
+          {% endfor %}
+        </ul>
+        <div class="store-actions">
+          <form data-store-update data-store-id="{{ store.store_id }}">
+            <label>Display name
+              <input name="display_name" value="{{ store.display_name }}" maxlength="255" required>
+            </label>
+            <label><span>Active</span>
+              <input name="is_active" type="checkbox" {% if store.is_active %}checked{% endif %}>
+            </label>
+            <button type="submit">Save store</button>
+          </form>
+          <form data-store-alias data-store-id="{{ store.store_id }}">
+            <label>Source spelling
+              <input name="raw_alias" maxlength="255" required>
+            </label>
+            <label>Location identifier (optional)
+              <input name="location_signature" maxlength="500">
+            </label>
+            <button type="submit">Add alias</button>
+          </form>
+        </div>
+        <div class="grouping-actions">
+          <form data-store-merge data-store-id="{{ store.store_id }}">
+            <label>Merge into
+              <select name="target_store_id" required>
+                <option value="">Select active store</option>
+                {% for candidate in stores %}
+                {% if candidate.store_id != store.store_id and candidate.is_active %}
+                <option value="{{ candidate.store_id }}">{{ candidate.display_name }} · {{ candidate.store_id[:8] }}</option>
+                {% endif %}
+                {% endfor %}
+              </select>
+            </label>
+            <label>Reason
+              <input name="reason" maxlength="1000" required>
+            </label>
+            <button type="submit">Merge store</button>
+          </form>
+          <form data-store-split data-store-id="{{ store.store_id }}">
+            <fieldset>
+              <legend>Aliases to move</legend>
+              {% for alias in store.aliases %}
+              <label><input name="alias_key" type="checkbox" value="{{ alias.normalized_key }}">
+                {{ alias.raw_alias }} ({{ alias.normalized_key }})
+              </label>
+              {% else %}
+              <span>No aliases available</span>
+              {% endfor %}
+            </fieldset>
+            <label>New store name
+              <input name="new_display_name" maxlength="255" required>
+            </label>
+            <label>Reason
+              <input name="reason" maxlength="1000" required>
+            </label>
+            <button type="submit">Split aliases forward</button>
+          </form>
+        </div>
+        <p class="store-message" role="status" aria-live="polite"></p>
+      </article>
+      {% else %}
+      <p>No stores have been resolved yet.</p>
+      {% endfor %}
+    </section>
+  </main>
+  <script>
+    function csrfToken() {
+      return document.cookie.split(";").map((part) => part.trim())
+        .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
+    }
+
+    async function sendStoreRequest(form, path, payload, retryConfirmed = false) {
+      const response = await fetch(path, {
+        method: form.matches("[data-store-update]") ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 409 && !retryConfirmed) {
+        const result = await response.json();
+        if (result.detail.includes("explicit confirmation") && window.confirm(result.detail)) {
+          payload.confirm_duplicate_name = true;
+          return sendStoreRequest(form, path, payload, true);
+        }
+        throw new Error(result.detail);
+      }
+      if (!response.ok) {
+        const result = await response.json();
+        throw new Error(result.detail ?? "Store update failed");
+      }
+      return response.json();
+    }
+
+    document.querySelectorAll("[data-store-update], [data-store-alias]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const storeId = form.dataset.storeId;
+        const card = form.closest(".store");
+        const message = card.querySelector(".store-message");
+        const values = new FormData(form);
+        const isUpdate = form.matches("[data-store-update]");
+        const path = `/api/v1/stores/${encodeURIComponent(storeId)}${isUpdate ? "" : "/aliases"}`;
+        const payload = isUpdate
+          ? {
+              display_name: values.get("display_name"),
+              is_active: form.elements.is_active.checked,
+            }
+          : {
+              raw_alias: values.get("raw_alias"),
+              location_signature: values.get("location_signature") || null,
+            };
+        try {
+          const result = await sendStoreRequest(form, path, payload);
+          if (isUpdate) {
+            card.querySelector(".store-name").textContent = result.display_name;
+            const status = card.querySelector(".status");
+            status.textContent = result.is_active ? "Active" : "Inactive";
+            status.classList.toggle("inactive", !result.is_active);
+            message.textContent = "Store updated";
+          } else {
+            const aliases = card.querySelector(".aliases");
+            const emptyMessage = aliases.querySelector("li");
+            if (emptyMessage?.textContent === "No aliases recorded") emptyMessage.remove();
+            const row = document.createElement("li");
+            row.append(document.createTextNode(result.raw_alias + " "));
+            const key = document.createElement("span");
+            key.className = "alias-key";
+            key.textContent = `(${result.normalized_key})`;
+            row.append(key);
+            aliases.append(row);
+            const aliasCount = card.querySelector(".meta span");
+            aliasCount.textContent = `${Number.parseInt(aliasCount.textContent, 10) + 1} aliases`;
+            form.reset();
+            message.textContent = "Alias added";
+          }
+          message.dataset.error = "false";
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-store-merge], [data-store-split]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const card = form.closest(".store");
+        const message = card.querySelector(".store-message");
+        const values = new FormData(form);
+        const isMerge = form.matches("[data-store-merge]");
+        if (!window.confirm(isMerge
+          ? "Merge aliases, store items, and receipts into the selected store?"
+          : "Move these aliases for future imports only? Existing receipts will stay here.")) return;
+        const payload = isMerge
+          ? {
+              source_store_id: form.dataset.storeId,
+              target_store_id: values.get("target_store_id"),
+              reason: values.get("reason"),
+              source_event_id: globalThis.crypto?.randomUUID?.()
+                ?? `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            }
+          : {
+              source_store_id: form.dataset.storeId,
+              alias_keys: Array.from(form.querySelectorAll("input[name='alias_key']:checked"))
+                .map((input) => input.value),
+              new_display_name: values.get("new_display_name"),
+              reason: values.get("reason"),
+              source_event_id: globalThis.crypto?.randomUUID?.()
+                ?? `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            };
+        try {
+          const response = await fetch(`/api/v1/stores/${isMerge ? "merge" : "split"}`, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+            body: JSON.stringify(payload),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.detail ?? "Store operation failed");
+          window.location.reload();
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Item Mapping | Market Business System</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f3f6f4; color: #182521; }
+    main { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    h1 { margin: 0 0 .3rem; font-size: 1.75rem; }
+    .lede { color: #52635c; margin: 0 0 1.25rem; }
+    .toolbar { display: flex; gap: .75rem; align-items: end; margin-bottom: 1rem; }
+    .toolbar label, label { display: grid; gap: .3rem; font-weight: 600; }
+    .toolbar input { max-width: 28rem; }
+    input, select, button { min-width: 0; padding: .55rem .65rem; border: 1px solid #9eafa6; border-radius: 4px; font: inherit; }
+    button { background: #fff; color: #18372c; cursor: pointer; }
+    button:hover { background: #e6efe9; }
+    .item-list { display: grid; gap: .75rem; }
+    .item-row { background: #fff; border: 1px solid #d4ded8; border-radius: 6px; padding: 1rem; }
+    .item-head { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+    .item-head h2 { margin: 0; font-size: 1.1rem; }
+    .item-subtitle, .meta { color: #52635c; }
+    .meta { display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; margin: .4rem 0 1rem; }
+    .owner-galleries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .gallery { min-width: 0; border-top: 1px solid #d4ded8; padding-top: .7rem; }
+    .gallery h3 { margin: 0 0 .55rem; font-size: 1rem; }
+    .gallery-toolbar, .gallery-images, .gallery-image-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+    .gallery-toolbar input[type="file"] { max-width: 100%; }
+    .gallery-images { align-items: start; margin-top: .65rem; }
+    .gallery-image { width: 7rem; display: grid; gap: .35rem; }
+    .gallery-image img, .gallery-primary img { display: block; width: 7rem; aspect-ratio: 1; object-fit: contain; background: #edf1ee; }
+    .gallery-primary { display: flex; align-items: center; gap: .7rem; min-height: 7rem; }
+    .gallery-placeholder { width: 7rem; aspect-ratio: 1; display: grid; place-items: center; background: #edf1ee; color: #52635c; text-align: center; }
+    .gallery-message { min-height: 1.2rem; color: #286143; }
+    .gallery-message[data-error="true"] { color: #a2312c; }
+    .row-controls { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 1.3fr) minmax(9rem, .8fr) minmax(12rem, 1.4fr) auto; gap: .65rem; align-items: end; }
+    .suggestions { margin-top: .65rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+    .suggestion { border-left: 3px solid #3d8061; padding: .3rem .55rem; background: #eff6f1; }
+    .message { min-height: 1.25rem; margin: .65rem 0 0; color: #286143; }
+    .message[data-error="true"] { color: #a2312c; }
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) {
+      main { padding: 1rem .7rem 2rem; }
+      .toolbar { display: block; }
+      .toolbar button { margin-top: .6rem; }
+      .item-head { display: block; }
+      .row-controls { grid-template-columns: 1fr 1fr; }
+      .row-controls button { align-self: end; }
+    }
+    @media (max-width: 420px) {
+      .row-controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Item Mapping</h1>
+    <p class="lede">Store product identities and their canonical item assignments.</p>
+    <div class="toolbar">
+      <label>Search items
+        <input id="item-search" type="search" placeholder="Name, description, store, or product ID">
+      </label>
+      <button type="button" id="unmapped-toggle" aria-pressed="false">Show unmapped only</button>
+    </div>
+    <section class="item-list" aria-label="Store items">
+      {% for row in store_items %}
+      <article class="item-row" data-store-item-id="{{ row.store_item_id }}"
+               data-search="{{ (row.common_name or '') ~ ' ' ~ (row.store_common_name or '') ~ ' ' ~ row.store_name ~ ' ' ~ row.store_product_id ~ ' ' ~ row.description }}"
+               data-mapped="{{ 'true' if row.mapping_confirmed else 'false' }}">
+        <div class="item-head">
+          <div>
+            <h2>{{ row.store_common_name or row.common_name or row.description }}</h2>
+            <div class="item-subtitle">{{ row.store_name }} · {{ row.store_product_id }}</div>
+          </div>
+          <span>{{ "Confirmed" if row.mapping_confirmed else "Needs confirmation" }}</span>
+        </div>
+        <div class="meta">
+          <span>Printed: {{ row.description }}</span>
+          <span>UPC: {{ row.upc or "Not recorded" }}</span>
+          <span>Canonical name: {{ row.common_name or "Not named" }}</span>
+          <span>Last purchase: {{ row.last_purchase_date or "None" }}</span>
+        </div>
+        <form class="row-controls" data-item-map data-store-item-id="{{ row.store_item_id }}"
+              data-item-id="{{ row.item_id }}">
+          <label>Store item name
+            <input name="store_common_name" value="{{ row.store_common_name or '' }}" maxlength="255">
+          </label>
+          <label>Canonical item name
+            <input name="canonical_common_name" value="{{ row.common_name or '' }}" maxlength="255">
+          </label>
+          <label>Canonical item
+            <select name="item_id" required>
+              {% for item in canonical_items %}
+              <option value="{{ item.item_id }}" {% if item.item_id == row.item_id %}selected{% endif %}>
+                {{ item.common_name or "Unnamed item" }} · {{ item.item_id[:8] }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Effective from
+            <input name="effective_from" type="date" required>
+          </label>
+          <label>Reason
+            <input name="reason" maxlength="1000" required>
+          </label>
+          <button type="submit">Confirm mapping</button>
+          <button type="button" data-save-item-name>Save canonical name</button>
+        </form>
+        <div class="suggestions" aria-live="polite"></div>
+        <p class="message" role="status" aria-live="polite"></p>
+        <button type="button" data-show-suggestions>Find suggestions</button>
+        <button type="button" data-split-item>Split to new item</button>
+        <div class="owner-galleries">
+          <section class="gallery" data-image-gallery data-owner-kind="STORE_ITEM"
+                   data-owner-id="{{ row.store_item_id }}">
+            <h3>Store item images</h3>
+            <div class="gallery-primary" data-gallery-primary></div>
+            <div class="gallery-toolbar">
+              <label>Upload image<input type="file" accept="image/jpeg,image/png" data-gallery-upload></label>
+              <label>Capture image<input type="file" accept="image/jpeg,image/png" capture="environment" data-gallery-upload></label>
+            </div>
+            <div class="gallery-images" data-gallery-images></div>
+            <p class="gallery-message" data-gallery-message role="status" aria-live="polite"></p>
+          </section>
+          <section class="gallery" data-image-gallery data-owner-kind="ITEM"
+                   data-owner-id="{{ row.item_id }}">
+            <h3>Canonical item images</h3>
+            <div class="gallery-primary" data-gallery-primary></div>
+            <div class="gallery-toolbar">
+              <label>Upload image<input type="file" accept="image/jpeg,image/png" data-gallery-upload></label>
+              <label>Capture image<input type="file" accept="image/jpeg,image/png" capture="environment" data-gallery-upload></label>
+            </div>
+            <div class="gallery-images" data-gallery-images></div>
+            <p class="gallery-message" data-gallery-message role="status" aria-live="polite"></p>
+          </section>
+        </div>
+      </article>
+      {% else %}
+      <p>No store items have been imported.</p>
+      {% endfor %}
+    </section>
+  </main>
+  <dialog data-gallery-replacement-dialog>
+    <form method="dialog">
+      <p>Replace the current image?</p>
+      <div class="gallery-toolbar">
+        <button value="no" autofocus>Keep current primary</button>
+        <button value="yes">Replace primary</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    function csrfToken() {
+      return document.cookie.split(";").map((part) => part.trim())
+        .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
+    }
+
+    function eventId() {
+      return globalThis.crypto?.randomUUID?.()
+        ?? `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    async function postJson(path, payload) {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Item mapping failed");
+      return body;
+    }
+
+    document.querySelectorAll("[data-item-map]").forEach((form) => {
+      const now = new Date();
+      form.elements.effective_from.value = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const row = form.closest(".item-row");
+        const values = new FormData(form);
+        const message = row.querySelector(".message");
+        try {
+          const body = await postJson("/api/v1/items/map", {
+            store_item_id: form.dataset.storeItemId,
+            item_id: values.get("item_id"),
+            store_common_name: form.elements.store_common_name.value,
+            effective_from: values.get("effective_from"),
+            reason: values.get("reason"),
+            source_event_id: eventId(),
+          });
+          form.dataset.itemId = body.item_id;
+          row.dataset.mapped = "true";
+          message.textContent = "Mapping confirmed";
+          message.dataset.error = "false";
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-save-item-name]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const form = button.closest("[data-item-map]");
+        const row = button.closest(".item-row");
+        const message = row.querySelector(".message");
+        try {
+          const response = await fetch(`/api/v1/items/${encodeURIComponent(form.dataset.itemId)}`, {
+            method: "PUT",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+            body: JSON.stringify({ common_name: form.elements.canonical_common_name.value }),
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.detail ?? "Canonical name update failed");
+          message.textContent = "Canonical item name updated";
+          message.dataset.error = "false";
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-show-suggestions]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const row = button.closest(".item-row");
+        const list = row.querySelector(".suggestions");
+        const message = row.querySelector(".message");
+        try {
+          const response = await fetch(
+            `/api/v1/items/mapping-suggestions?store_item_id=${encodeURIComponent(row.dataset.storeItemId)}`,
+            { credentials: "same-origin" },
+          );
+          const suggestions = await response.json();
+          if (!response.ok) throw new Error(suggestions.detail ?? "Suggestions unavailable");
+          list.replaceChildren();
+          for (const suggestion of suggestions) {
+            const choice = document.createElement("button");
+            choice.type = "button";
+            choice.className = "suggestion";
+            choice.textContent = `${suggestion.common_name || "Unnamed item"}: ${suggestion.reasons.join(", ")}`;
+            choice.addEventListener("click", () => {
+              if (!window.confirm("Confirm this suggested item mapping?")) return;
+              row.querySelector("select[name='item_id']").value = suggestion.item_id;
+              row.querySelector("input[name='reason']").value = "Confirmed ranked suggestion";
+            });
+            list.append(choice);
+          }
+          if (suggestions.length === 0) message.textContent = "No ranked suggestions";
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+
+    document.querySelectorAll("[data-split-item]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const row = button.closest(".item-row");
+        const form = row.querySelector("[data-item-map]");
+        const name = window.prompt("Common name for the new canonical item:");
+        if (name === null) return;
+        const reason = window.prompt("Reason for splitting this store item:");
+        if (reason === null || !reason.trim()) return;
+        const message = row.querySelector(".message");
+        try {
+          await postJson("/api/v1/items/split", {
+            store_item_id: row.dataset.storeItemId,
+            common_name: name,
+            effective_from: form.elements.effective_from.value,
+            reason,
+            source_event_id: eventId(),
+          });
+          message.textContent = "Store item split to a new canonical item";
+          message.dataset.error = "false";
+          window.location.reload();
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        }
+      });
+    });
+
+    const replacementDialog = document.querySelector("[data-gallery-replacement-dialog]");
+
+    async function galleryRequest(path, options = {}) {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        ...options,
+        headers: {
+          ...(options.headers ?? {}),
+          ...(options.method && options.method !== "GET" ? { "X-CSRF-Token": csrfToken() } : {}),
+        },
+      });
+      const body = response.status === 204 ? {} : await response.json();
+      if (!response.ok) throw new Error(body.detail ?? "Image gallery request failed");
+      return body;
+    }
+
+    function galleryPath(gallery) {
+      return `/api/v1/image-owners/${encodeURIComponent(gallery.dataset.ownerKind)}`
+        + `/${encodeURIComponent(gallery.dataset.ownerId)}/images`;
+    }
+
+    async function choosePrimary(gallery, image) {
+      const path = `${galleryPath(gallery)}/${image.link_id}/primary`;
+      let result = await galleryRequest(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replace_primary: false }),
+      });
+      if (result.replace_prompt_required) {
+        const choice = await new Promise((resolve) => {
+          const decide = () => {
+            replacementDialog.removeEventListener("close", decide);
+            resolve(replacementDialog.returnValue === "yes");
+          };
+          replacementDialog.addEventListener("close", decide, { once: true });
+          replacementDialog.showModal();
+        });
+        if (!choice) {
+          await loadGallery(gallery);
+          return;
+        }
+        result = await galleryRequest(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ replace_primary: true }),
+        });
+      }
+      await loadGallery(gallery);
+    }
+
+    async function loadGallery(gallery) {
+      const message = gallery.querySelector("[data-gallery-message]");
+      const images = gallery.querySelector("[data-gallery-images]");
+      const primary = gallery.querySelector("[data-gallery-primary]");
+      try {
+        const data = await galleryRequest(galleryPath(gallery));
+        images.replaceChildren();
+        primary.replaceChildren();
+        if (data.resolved_primary) {
+          const preview = document.createElement("img");
+          preview.src = data.resolved_primary.thumbnail_url;
+          preview.alt = "Resolved primary item image";
+          primary.append(preview);
+          const label = document.createElement("span");
+          label.textContent = data.resolved_primary.owner_kind === gallery.dataset.ownerKind
+            ? "Primary image" : "Canonical item image";
+          primary.append(label);
+        } else {
+          const placeholder = document.createElement("div");
+          placeholder.className = "gallery-placeholder";
+          placeholder.textContent = "No image";
+          primary.append(placeholder);
+        }
+        const ordered = [...data.images].sort((left, right) => left.sort_order - right.sort_order);
+        ordered.forEach((image, index) => {
+          const tile = document.createElement("div");
+          tile.className = "gallery-image";
+          const preview = document.createElement("img");
+          preview.src = image.thumbnail_url;
+          preview.alt = image.is_primary ? "Primary item image" : "Item gallery image";
+          tile.append(preview);
+          const caption = document.createElement("span");
+          caption.textContent = image.is_primary ? "Primary" : "Gallery";
+          tile.append(caption);
+          const actions = document.createElement("div");
+          actions.className = "gallery-image-actions";
+          const primaryButton = document.createElement("button");
+          primaryButton.type = "button";
+          primaryButton.textContent = "Make primary";
+          primaryButton.disabled = image.is_primary;
+          primaryButton.addEventListener("click", () => choosePrimary(gallery, image));
+          actions.append(primaryButton);
+          for (const [label, offset] of [["Move earlier", -1], ["Move later", 1]]) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = label;
+            button.disabled = index + offset < 0 || index + offset >= ordered.length;
+            button.addEventListener("click", async () => {
+              const next = [...ordered];
+              const target = index + offset;
+              [next[index], next[target]] = [next[target], next[index]];
+              await galleryRequest(`${galleryPath(gallery)}/order`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ link_ids: next.map((entry) => entry.link_id) }),
+              });
+              await loadGallery(gallery);
+            });
+            actions.append(button);
+          }
+          const detachButton = document.createElement("button");
+          detachButton.type = "button";
+          detachButton.textContent = "Detach";
+          detachButton.addEventListener("click", async () => {
+            await galleryRequest(`${galleryPath(gallery)}/${image.link_id}`, { method: "DELETE" });
+            await loadGallery(gallery);
+          });
+          actions.append(detachButton);
+          tile.append(actions);
+          images.append(tile);
+        });
+        message.textContent = "";
+        message.dataset.error = "false";
+      } catch (error) {
+        message.textContent = error.message;
+        message.dataset.error = "true";
+      }
+    }
+
+    document.querySelectorAll("[data-image-gallery]").forEach((gallery) => {
+      loadGallery(gallery);
+      gallery.querySelector("[data-gallery-upload]").addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const message = gallery.querySelector("[data-gallery-message]");
+        try {
+          const uploaded = await galleryRequest(galleryPath(gallery), {
+            method: "POST",
+            headers: { "Content-Type": file.type },
+            body: file,
+          });
+          if (uploaded.replace_prompt_required) {
+            await choosePrimary(gallery, { link_id: uploaded.link_id });
+          } else {
+            await loadGallery(gallery);
+          }
+        } catch (error) {
+          message.textContent = error.message;
+          message.dataset.error = "true";
+        } finally {
+          event.target.value = "";
+        }
+      });
+    });
+
+    const search = document.querySelector("#item-search");
+    const unmappedToggle = document.querySelector("#unmapped-toggle");
+    function filterRows() {
+      const term = search.value.toLocaleLowerCase();
+      const onlyUnmapped = unmappedToggle.getAttribute("aria-pressed") === "true";
+      document.querySelectorAll(".item-row").forEach((row) => {
+        row.hidden = !row.dataset.search.toLocaleLowerCase().includes(term)
+          || (onlyUnmapped && row.dataset.mapped === "true");
+      });
+    }
+    search.addEventListener("input", filterRows);
+    unmappedToggle.addEventListener("click", () => {
+      const pressed = unmappedToggle.getAttribute("aria-pressed") !== "true";
+      unmappedToggle.setAttribute("aria-pressed", String(pressed));
+      filterRows();
+    });
+  </script>
+</body>
+</html>

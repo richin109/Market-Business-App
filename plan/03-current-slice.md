@@ -15,6 +15,12 @@ Owner-directed override of the paused queue: PostgreSQL is the sole supported ru
 
 Next after this gate: S13 remainder (timed coordinated PostgreSQL/file restore and application-container restart evidence), not S18. Production credentials/scanning, private-corpus accuracy, future domain concurrency tests, and alternate-backend certification remain unchecked.
 
+## Fast Local Test Workflow — 2026-10-02
+
+- [x] Preserve the implemented fast runner as the default future local development path under [the governing contract](00-overview.md#fast-test-development-contract-all-stages). Build `docker compose build test` initially/configuration changes, then use `docker compose run --rm test-dev pytest <tests> -q`, mounted Ruff/strict mypy and `docker compose run --rm test-dev`. Retain rebuilt unmounted candidate gates; this does not complete D-77's outstanding review/candidate checklist or S13/S18.
+	- Prior implementation evidence: full mounted suite 192 passed/1 private-corpus skip; Ruff and strict mypy on 76 files passed; unmounted baseline/backup 17 passed. Default-profile exclusion, read-only/non-root mounts, isolated caches/temp work and stale-dependency refusal were verified. Critical review fixed pytest's attempt to remove a tmpfs mount root and preserved LF shell checkout on Windows. Traceability remains the existing RT093/RM/ST/IT/IM rows and candidate commands, not a new business acceptance case.
+- [ ] Apply the shared preservation checklist to each future slice; record local versus candidate commands/results and rebuild reasons. Do not lower migration, database, browser, full-suite, D-00 or production gates to shorten test execution.
+
 Evidence recorded 2026-09-30 (host, Python 3.12.10, uv-managed environment from `uv.lock`): `pytest` 50 passed; `ruff check src tests` passed; `mypy src tests` (strict) passed; HTTP `GET /health` returned `{"status":"ok"}` from uvicorn. S1 and S2 foundations are component-tested. S3–S9 contain provider boundaries, persistence, duplicate review, correction, classification, and approval components, but the implementation audit Vfound runtime-wiring, concurrency, PostgreSQL, audit-history, and API-surface gaps. R1–R8 below reopen the affected claims; component tests are not release evidence until the real entry points and release profiles pass. The mocked OCR boundary remains the development provider; image no-scan is approved, PDF scanning is future work, and real-data use remains gated.
 
 ## Infrastructure Refresh — 2026-10-01
