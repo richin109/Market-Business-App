@@ -22,6 +22,7 @@ from mbs.items import (
     set_store_item_common_name,
     suggest_item_mappings,
 )
+from mbs.item_images import ImageOwnerKind, ItemImageGalleryService, get_item_image_gallery_service
 from mbs.media_assets import MediaAssetService
 from mbs.models import (
     AuditLog,
@@ -95,7 +96,6 @@ class ImageOrderRequest(BaseModel):
     link_ids: list[int] = Field(min_length=1, max_length=100)
 
 
-ImageOwnerKind = Literal["ITEM", "STORE_ITEM"]
 ImageVariant = Literal["thumbnail", "display", "original"]
 
 
@@ -132,70 +132,14 @@ def _image_owner_primary(
 def list_owner_images(
     owner_kind: ImageOwnerKind,
     owner_id: str,
+    gallery: ItemImageGalleryService = Depends(get_item_image_gallery_service),  # noqa: B008
     _current: tuple[User, AuthSession] = Depends(current_session_user),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, object]:
-    owner = _lock_image_owner(session, owner_kind, owner_id, lock=False)
-    links = session.execute(
-        select(MediaAssetLink, MediaAsset)
-        .join(MediaAsset, MediaAsset.asset_sha256 == MediaAssetLink.asset_sha256)
-        .where(
-            MediaAssetLink.owner_kind == owner_kind,
-            MediaAssetLink.owner_id == owner_id,
-            MediaAssetLink.status == "CONFIRMED",
-            MediaAssetLink.detached_at.is_(None),
-        )
-        .order_by(MediaAssetLink.sort_order, MediaAssetLink.id)
-    ).all()
-    primary_link = next(
-        (link for link, asset in links if link.is_primary and asset.ingest_status == "READY"),
-        None,
-    )
-    fallback_kind: str | None = None
-    fallback_owner_id: str | None = None
-    if primary_link is None and isinstance(owner, StoreItem) and owner.mapping_confirmed:
-        fallback_kind, fallback_owner_id = "ITEM", owner.item_id
-        primary_link = _image_owner_primary(session, "ITEM", owner.item_id, lock=False)
-    if primary_link is None:
-        fallback_kind = None
-        fallback_owner_id = None
-    return {
-        "owner_kind": owner_kind,
-        "owner_id": owner_id,
-        "resolved_primary": (
-            {
-                "owner_kind": fallback_kind or owner_kind,
-                "owner_id": fallback_owner_id or owner_id,
-                "link_id": primary_link.id,
-                "thumbnail_url": (
-                    f"/api/v1/image-owners/{fallback_kind or owner_kind}/"
-                    f"{fallback_owner_id or owner_id}/images/{primary_link.id}/thumbnail"
-                ),
-            }
-            if primary_link is not None
-            else None
-        ),
-        "placeholder": primary_link is None,
-        "images": [
-            {
-                "link_id": link.id,
-                "asset_sha256": asset.asset_sha256,
-                "is_primary": link.is_primary,
-                "sort_order": link.sort_order,
-                "source_id": link.source_id,
-                "source_page": link.source_page,
-                "ingest_status": asset.ingest_status,
-                "thumbnail_url": (
-                    f"/api/v1/image-owners/{owner_kind}/{owner_id}/images/{link.id}/thumbnail"
-                ),
-                "display_url": (
-                    f"/api/v1/image-owners/{owner_kind}/{owner_id}/images/{link.id}/display"
-                ),
-            }
-            for link, asset in links
-            if asset.ingest_status == "READY"
-        ],
-    }
+    try:
+        return gallery.list_images(session, owner_kind, owner_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.post("/image-owners/{owner_kind}/{owner_id}/images")
