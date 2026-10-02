@@ -1,16 +1,16 @@
 # Capability 12: Tax Information & Filing Support
 
-Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
-- [ ] Test full tax-year dates, Decimal reconciliation, immutable lineage/exports from coherent snapshots, mapping-period races, and restore verification; database changes never waive human/provider approvals.
+Database: PostgreSQL only; see [D-77](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test full tax-year dates, Decimal reconciliation, immutable coherent exports/lineage, mapping races, restore. DB changes do not waive human/provider gates.
 
 - [ ] **Capability complete** (all features below checked)
 
-Bounded context: `mbs/tax_reporting/`. Produces year-specific, reviewable business-tax workpapers and source-linked exports for the owner or tax professional. This capability supports preparation; it does not determine legal tax treatment, calculate a final tax liability, prepare the owner's complete personal return, or transmit/file returns.
+Bounded context: `mbs/tax_reporting/`. Produces year-specific business-tax workpapers/source-linked exports for owner/preparer. It does not decide legal tax treatment, calculate final liability, prepare the full personal return, or transmit/file.
 
 ## Feature 12.1 — Tax Profile & Applicability
 - [ ] Feature complete
 - [ ] Set the current federal profile to sole proprietorship, reported as part of the owner's Form 1040; target Schedule C (Form 1040) workpapers by default. Keep entity type/tax classification editable with an audit trail if the business structure or election changes.
-- [ ] Capture tax year/accounting period, federal accounting method, business start/end dates, ownership details, tax preparer, and applicable operating jurisdictions.
+- [ ] Capture tax year/period, federal method, business dates, ownership, preparer, and jurisdictions.
 - [ ] Capture Florida Department of Revenue account types and filing frequencies when applicable: sales and use tax, corporate income/franchise tax, and reemployment tax if there are employees. Keep state/local account identifiers encrypted and access-controlled; do not expose them in routine exports or logs.
 - [ ] Use the confirmed sole-proprietor/Schedule C path unless the saved tax profile is changed; do not infer a different federal tax classification from the business name or Florida legal entity alone.
 - [ ] Florida has no individual income tax return; do not generate a Florida individual income-tax form. Clearly show state business filing tasks only when the selected entity/activity makes them applicable.
@@ -18,15 +18,15 @@ Bounded context: `mbs/tax_reporting/`. Produces year-specific, reviewable busine
 
 ## Feature 12.2 — Federal Business Tax Workpapers
 - [ ] Feature complete
-- [ ] Generate a tax-year Schedule C-aligned workpaper (current IRS line mapping) with gross receipts, returns/allowances, COGS support, gross profit, expenses, vehicle/mileage evidence, other expenses, and net profit, plus source-linked detail schedules. Label it clearly as a preparation workpaper, not an official IRS return.
+- [ ] Generate current-line-mapped Schedule C workpaper: receipts, returns/allowances, COGS, gross profit, expenses, mileage, other expenses, net profit, source-linked schedules. Label as workpaper, not IRS return.
 - [ ] Export a printable PDF and supporting XLSX/CSV schedules for the owner or preparer to use with Form 1040 filing software or a tax professional; do not generate/sign/file Form 1040 or transmit the workpaper as a return.
-- [ ] Prepare annual gross-receipts reconciliation from accepted Square Orders, Square Payments, refunds/returns, discounts, and payment-settlement reports. Reconcile Forms 1099-K and other third-party statements to the underlying Square sales; identify sales tax collected, Square fees, refunds, timing differences, and deposits separately so gross receipts are not confused with net payouts. Missing source coverage remains a blocking close exception.
+- [ ] Reconcile annual gross receipts from accepted Square Orders/Payments, refunds, discounts, settlements, Forms 1099-K, and third-party statements. Separate sales tax, fees, refunds, timing differences, deposits; missing source coverage blocks close.
 - [ ] Produce an inventory/COGS support schedule with beginning and ending quantities/values, purchases net of returns/allowances, personal withdrawals, production materials, labor/other cost inputs where recorded, valuation method, and a reconciliation to operational inventory. Flag unsupported tax/accounting choices for review rather than choosing a method.
-- [ ] Summarize operating expenses by user-/preparer-reviewed tax category and period, grouped by canonical store and canonical item so alias spellings and abbreviated receipt descriptions do not fragment or double-count a vendor or purchase; identify personal, mixed-use, missing-receipt, unallocated, and potentially nondeductible items for review. Do not treat the app's management-profit categories as tax classifications automatically.
+- [ ] Summarize expenses by reviewed tax category/period and canonical store/item. Flag personal, mixed-use, missing-receipt, unallocated, possibly nondeductible items. Management-profit categories are not tax classifications.
 - [ ] Include the capital-asset register, acquisitions/disposals, purchase cost, business-use percentage, placed-in-service/disposal dates, and prior/current depreciation data supplied by the preparer. Provide a depreciation workpaper/export; do not automatically elect Section 179, bonus depreciation, or a depreciation method.
-- [ ] Provide business vehicle and mileage evidence: date, vehicle, starting/ending locations, business purpose, route legs, business miles, personal/commuting miles where known, and parking/tolls. Support travel outside market routes and mark incomplete logs; do not assume all Home-to-market travel is deductible.
+- [ ] Record vehicle/mileage date, vehicle, route/locations, business purpose/miles, known personal/commuting miles, parking/tolls. Support non-market travel, flag incomplete logs, and do not assume Home-market travel is deductible.
 - [ ] Include year-to-date estimated tax payments/withholding entered or imported by the user, and optional payroll and contractor-payment summaries. Keep payee tax IDs and source tax forms encrypted and out of general-purpose exports unless explicitly selected for an authorized tax package.
-- [ ] Make clear that the Schedule C package is business-only. Owner wages, spouse income, personal deductions/credits, other businesses, and other Form 1040 inputs remain outside the app and must be supplied separately to the owner's tax software or preparer.
+- [ ] Mark Schedule C package business-only; wages, spouse income, personal deductions/credits, other businesses, and remaining Form 1040 data come from owner/preparer separately.
 - [ ] Provide a Schedule SE support summary for business net profit and source records where useful, but do not calculate final self-employment tax because the owner's other income and individual circumstances are outside this business system.
 
 ## Feature 12.3 — Florida State & Local Business Tax Workpapers
@@ -40,9 +40,9 @@ Bounded context: `mbs/tax_reporting/`. Produces year-specific, reviewable busine
 
 ## Feature 12.4 — Review, Reconciliation & Export
 - [ ] Feature complete
-- [ ] Create a tax-year close checklist for missing receipts, unreviewed OCR items, unmatched 1099-K amounts, unresolved refunds, expected-inventory/COGS valuation and source-coverage gaps (no physical counts), uncategorized expenses, asset disposals, mileage gaps, sales-tax exceptions, and tax payments.
+- [ ] Close checklist: missing receipts/unreviewed OCR, 1099-K gaps, refunds, inventory/COGS/source gaps (no counts), uncategorized expenses, asset disposals, mileage, sales-tax exceptions, tax payments.
 - [ ] Classify every close-checklist exception as blocking or advisory. Package generation and full-system production promotion require zero unresolved blocking exceptions for source coverage, tax mapping, gross-receipts/1099-K reconciliation, sales-tax reconciliation, inventory/COGS reconciliation, and owner/preparer-required decisions.
-- [ ] Preserve drill-through from every workpaper total to source Square order/payment, receipt line, purchase, expense, market visit, inventory record, asset, imported form, or manual adjustment.
+- [ ] Drill through every workpaper total to its order/payment, receipt line, purchase, expense, visit, inventory, asset, imported form, or adjustment.
 - [ ] For purchases documented across multiple PDFs, index all originals under one canonical receipt and trace each included amount to the accepted line occurrence and its source page. Exclude overlapping copies and personal lines from business expense/COGS schedules; flag unresolved subtotal, missing-source, or unreviewed mixed-use lines in the close checklist rather than treating each file as another deductible purchase (RM-022).
 - [ ] Generate a versioned tax-year snapshot and export workbook/CSV schedules plus a source-document index for an authorized owner or preparer. Record who generated/reviewed the package, included records, unresolved exceptions, and export timestamp.
 - [ ] Allow corrections through auditable adjustments and generate a new snapshot; never silently rewrite a previously exported or reviewed tax package.
@@ -51,7 +51,7 @@ Bounded context: `mbs/tax_reporting/`. Produces year-specific, reviewable busine
 
 ## Feature 12.5 — Data Protection & Tax-Year Controls
 - [ ] Feature complete
-- [ ] Restrict tax packages and identifiers to authorized MANAGER/ADMIN users; encrypt sensitive identifiers/documents at rest and in backups, audit access/export, and redact secrets from logs.
+- [ ] Restrict packages/IDs to MANAGER/ADMIN; encrypt sensitive data at rest/in backups, audit access/export, redact secrets from logs.
 - [ ] Apply tax-year-specific records, effective-dated rates/mappings, and retention policy; preserve source records and filed-return/payment confirmations according to the user-/preparer-configured retention schedule.
 - [ ] Separate tax-workpaper mappings from management reporting categories so changing one does not silently alter the other.
 

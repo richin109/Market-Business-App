@@ -1,18 +1,17 @@
 # MVP Go / No-Go Assessment (Vibe-Coding Readiness)
-# MVP Go / No-Go Assessment (Vibe-Coding Readiness)
 
-Architecture and execution-boundary review dated 2026-10-02: [05-architecture-and-execution-review.md](05-architecture-and-execution-review.md). This clarifies technical ownership only and does not alter approved business decisions.
+Architecture/ownership review (2026-10-02): [05-architecture-and-execution-review.md](05-architecture-and-execution-review.md). Technical clarification only; no business decision changed.
 
-Assessment date: 2026-09-30. Reviewer role: senior QA, AI-agent ("vibe") delivery.
-Scope: MVP 1–8 in [01-mvp-roadmap.md](01-mvp-roadmap.md), judged against the written plan files: [00-overview.md](00-overview.md), [02-implementation-readiness.md](02-implementation-readiness.md), [03-current-slice.md](03-current-slice.md), all 16 capability files, and [test-case-manifest.csv](test-case-manifest.csv). The Blueprint DOCX and files in `support/` are reference materials reviewed for context, not competing authority.
+Verdict snapshot date: 2026-09-30. Reviewer: senior QA/AI-agent delivery. Later implementation evidence in §2 and `03-current-slice.md` supersedes this snapshot's status.
+Scope: MVP 1–8 against the roadmap, overview, readiness, active slice, 16 capabilities, and manifest. Blueprint/support are references, not authority.
 
-This document does not override the precedence in the readiness gate. Every "recommended default" below is a **proposal**; it becomes binding only when the owner approves it in §5 and the governing capability/roadmap text is reconciled. Approval does not certify unimplemented tests, expand an outline into a runnable slice, or waive a production gate.
+Readiness-gate precedence applies. Each recommended default is a **proposal** until owner approval in §5 and reconciliation with governing docs. Approval does not certify tests, expand outlines, or waive production gates.
 
-Independent of the optional defaults below, Square API access has a mandatory no-write gate in Capability 3 and the MVP 2 readiness profile. MBS never attempts a provider-side mutation, even with owner approval of a session workflow. SQ-001 must pass and credential read scopes must be verified before live Square activation.
+Square's no-write gate is mandatory regardless of defaults: MBS never mutates Square. Pass SQ-001 and verify read-only scopes before live activation.
 
 Two definitions:
-- **Build GO**: an agent can implement and test the MVP locally with synthetic data and mocked providers, without stopping for a decision.
-- **Prod GO**: the MVP can be promoted with real data and live providers.
+- **Build GO:** implement/test locally with synthetic data and mocks without unresolved decisions.
+- **Prod GO:** promote with real data/live providers.
 
 ## 1. Verdict Summary
 
@@ -28,14 +27,14 @@ Two definitions:
 | 7 Dashboards/Rankings/Forecast | **NO-GO** | CONDITIONAL (translate and implement cases) | NO-GO | source-test intent triage and 61 structural/tautological cases need application evidence |
 | 8 Tax + Full Release | **NO-GO** | CONDITIONAL (draft workpapers only) | **NO-GO by design** | Needs signed tax-professional approval and a coverage certificate (U-7). The agent cannot close this gate. |
 
-Bottom line: local receipt work may continue with mocks; the Docker Compose foundation is installed and validated (U-1 done 2026-09-30). Owner approval of §5 removes decision blockers, not missing slice specifications, executable tests, or production evidence. MVP 8 production always needs a human tax professional.
+Local receipt work may continue with mocks; Compose foundation is validated (U-1). §5 approval removes decision blockers, not missing specs/tests/evidence. MVP 8 production always requires a tax professional.
 
 ## 2. Evidence Reviewed
 
 | Artifact | Finding |
 |---|---|
 | Current manifest verification (2026-10-01) | 169 rows: 147 `PLANNED`, 22 `VERIFIED`; ST-001/ST-002/IT-001/IT-002, MR-001, RM-012, RM-015, RM-021/RM-022/RM-028, and IM-001/IM-002 have current test links. S10-Review, S10a, S10b source association/review, and S17 imagery completed 2026-10-01. This supersedes the 2026-09-30 snapshot below. R3 PostgreSQL migration proof, R4–R8, S14–S17, S10-Routing, D-66, S10-Review, S10a, and S10b are implemented; RM-023/RM-024 and S18 gates remain separate. |
-| `plan/*.md`, 16 capability files | Detailed and mostly internally consistent. Plan precedence resolves most source conflicts. |
+| Plan Markdown, 16 capabilities | Detailed and mostly consistent; precedence resolves most conflicts. |
 | `plan/test-case-manifest.csv` | Contains 169 rows: 147 `PLANNED` and 22 `VERIFIED`. Planned rows may reference future tests, but missing commands do not count as coverage. RM-003/RM-004/RM-007/RM-008/RM-011/RM-013/RM-018/RT093/RM-021/RM-022/RM-026/RM-027, ST-001/ST-002/IT-001/IT-002, MR-001, RM-012, RM-015, RM-028, IM-001, and IM-002 are verified. RM-023/RM-024/RM-025 remain separately planned. SL-001–SL-004 cover shelf life/expiry; IM-001–IM-005 cover imagery. DS-001 and PH-001/PH-002 cover MVP 1-to-MVP 2 receipt-routing handoff before MP-002's load/sale check; PR-001 and PC-001 cover provisional lot and production correction handoffs; MP-004 covers MVP 2 target isolation while MP-001/MP-003 cover MVP 4 shopping/finalization. CS-001–CS-003 cover D-57 date-effective costing, late/backdated receipts, and lot-cost stock valuation across their named profiles. |
 | `Market_Business_System_v3_3_Testing_Dashboard.xlsx` (42 sheets) | Contains the fixtures and 110 regression cases. 46 are behavioral, 46 are formula-existence checks (`ISFORMULA`/`FORMULATEXT`), 14 are row-count/meta checks, 3 check configuration, and 1 is a tautology (RT041 is always 0). |
 | `Walmart_Receipt_Complete_With_AI.xlsx` | Reference-only receipt examples for deriving synthetic OCR fixtures and expected reconciliations. Owner confirmed 2026-09-30 that it contains no real purchase data, so it may stay in the repository. Real receipts still follow the real-data gate and must never be committed. |
@@ -75,9 +74,9 @@ All other findings from previous review cycles are fully resolved by approved de
 - **F31–F42 (Adversarial review):** All 12 closed 2026-09-30: F31 (contracts table repaired), F32 (premature checkboxes unchecked), F33 (D-59 single StockBalanceReader), F34 (D-60 production ownership in Cap 5), F35 (D-61 typed blocked result), F36/F42/F22 (D-63 recipes before sales), F37 (roadmap imagery updated), F38 (D-65 catalog keys documented), F39 (Cap 6 target/start-day corrected), F40 (D-62 disposition subtypes), F41 (D-58 FEFO lot consumption). F43 is a newly identified conditional branch-identity decision; it is not owner-approved.
 
 
-**Transition review evidence (plan only):** `git diff --check` and structured CSV parsing passed 2026-09-30; before the later MVP 1-to-MVP 2 boundary additions, the manifest held 165 unique IDs with 11 fields each (160 `PLANNED`, 5 `VERIFIED`). RT093 was returned to `PLANNED` on 2026-09-30 when its criterion was rewritten to be catalog-driven rather than count-driven. PR-001, PC-001, PD-001, BL-001, RM-028, and CS-001–CS-003 are planned, not implementation proof. No application code, migrations, provider calls, or runnable release tests were inspected or changed in this review; R1–R8 remain unchecked.
+**Transition review evidence (plan-only snapshot, 2026-09-30):** `git diff --check` and CSV parsing passed. Before later MVP 1-to-2 rows, the manifest had 165 unique 11-field IDs (160 PLANNED/5 VERIFIED). RT093 returned to PLANNED when its criterion became catalog-driven. PR-001, PC-001, PD-001, BL-001, RM-028, CS-001–003 were planned then, not implementation proof. R1–R8 were unchecked then; see newer evidence in §2 and `03-current-slice.md`.
 
-**Earlier plan-only review evidence:** `git diff --check` and structured CSV parsing passed when the manifest had 156 unique rows (150 `PLANNED`, 6 `VERIFIED`, 119 without validation commands). The current counts appear in §2 above. No application code was inspected or changed and no implementation, database, browser, OCR, provider, or release test was run for that reconciliation. D-00 and R1–R8 remain unchecked; future slices must prove real entry points, migrations, and release profiles before promotion.
+**Earlier plan-only review (2026-09-30):** `git diff --check` and CSV parsing passed with 156 rows (150 PLANNED/6 VERIFIED/119 missing commands). Current counts are in §2. That review inspected no code and ran no implementation/database/browser/OCR/provider/release tests; D-00/R1–R8 status there is historical. Future slices still require real entry points, migrations, and profiles.
 
 ## 4. Per-MVP Assessment
 

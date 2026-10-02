@@ -1,28 +1,28 @@
 # Architecture and Execution Review
 
-Review date: 2026-10-02. Scope: the MBS plan set, including the overview, roadmap, readiness gate, active slice, go/no-go assessment, slice specifications, capability files, and test-case manifest. This is a planning review only; no application code was changed.
+Review date: 2026-10-02. Scope: all MBS plan docs and manifest. Planning-only; no application code changed.
 
 ## Verdict
 
-The chosen deployment shape is appropriate for this business: a PostgreSQL-backed modular monolith, server-rendered web UI, background workers, and explicit provider adapters. The plan also correctly keeps Square as the sale system of record, treats receipts and provider imports as evidence, and separates synthetic development from live-data promotion.
+The PostgreSQL modular monolith, server-rendered UI, workers, and provider adapters fit. Square remains sales system of record; receipts/imports are evidence; synthetic work is separate from live-data promotion.
 
-The primary risk is not the technology stack. It is that several documents assign the same writes to different capabilities and repeat detailed rules without a single owner for each persisted fact. That will lead to competing ledgers, cross-context ORM access, circular imports, and inconsistent retries unless the ownership contract below is applied before MVP 2 work begins.
+Primary risk: documents assign writes to multiple capabilities and repeat rules without a fact owner, risking duplicate ledgers, cross-context ORM access, circular imports, and inconsistent retries. Apply the ownership contract before MVP 2.
 
 ## Findings
 
-1. **High: inventory write ownership is ambiguous.** D-60 and Capability 5 say the production service creates finished-stock, ingredient, supply, and waste movements. Capability 6 describes owning the inventory movement ledgers, while MVP 2 and MVP 3 already create receipt and production stock effects. The plan must distinguish ownership of a business event from ownership of the canonical stock ledger.
-2. **High: market planning has two apparent owners.** Capability 5 describes the one-time ordered market-set plan, while Capability 15 owns market plans, load lists, shopping, and prep. MVP 2 starts the minimal plan and MVP 4 expands it, but the record owner and write API are not explicit.
-3. **High: no explicit cross-context transaction contract.** Receipt routing, sale acceptance, production, cost history, and allocations must atomically update multiple records. The plan requires atomicity but does not consistently state which service orchestrates the use case, which context owns each table, or how contexts share a transaction without importing one another's ORM models.
-4. **High: MVP 6 ledger wording conflicts with earlier writers.** Receipt restock, ingredient/supply purchase, production, sales, and allocation movements are introduced in MVP 2–3. MVP 6 must reconcile and extend that same ledger, not introduce a second movement model or replay earlier facts.
-5. **Medium: MVP 1 is a wide vertical slice.** It combines OCR, source/version review, identity registries, routing, expenses/assets, media, retention, and backup. These are defensible release requirements, but treating them as one undifferentiated implementation step creates long feedback cycles. Keep the release boundary, but implement in explicit dependency-ordered sub-slices and require each to pass its own entry-point and migration checks.
-6. **Medium: physical schema and conceptual naming can drift.** Capability text mixes naming forms such as `tblProductSetup`, `tblIngredients`, and `tbl_receipt_items`. Future schema work needs one mapping from domain entity to Python model, physical table, owning capability, and source-event key. Do not rename delivered revisions or tables merely to normalize old names.
-7. **Medium: central failure handling is not closed.** Capability 9.3 says the error-log table has no writer; the release profiles do not clearly identify the slice that delivers a usable failure taxonomy/writer. Decide and assign that before treating the receipt release profile as complete. Audit events, expected business holds, and operational failures must remain distinct categories.
-8. **Medium: plan duplication weakens change control.** Detailed rules and status counts are copied into the overview, roadmap, readiness document, go/no-go report, slice specs, and capability files. The manifest currently has 169 data rows (147 PLANNED, 22 VERIFIED); 117 rows have no runnable validation command. Duplicated snapshots will drift unless they are explicitly dated and subordinate to the owning artifact.
-9. **Low: the MVP 4 slice table is malformed.** Slices 4.2 and 4.3 have been concatenated into one broken Markdown row, obscuring the acceptance boundary.
+1. **High: inventory ownership.** D-60/Cap 5 owns production events; Cap 6 owns stock ledger; MVP 2–3 already write stock. Separate business-event ownership from canonical ledger ownership.
+2. **High: planning ownership.** Cap 5 and Cap 15 both appear to own plans. Name the record owner/API across MVP 2 start and MVP 4 expansion.
+3. **High: cross-context transactions.** Define orchestration, table ownership, and shared transaction handling for routing, sales, production, costs, allocations without cross-context ORM imports.
+4. **High: MVP 6 ledger.** Reconcile/extend MVP 2–3 receipt, production, sales, allocation movements; never create a second ledger or replay facts.
+5. **Medium: MVP 1 breadth.** Keep release scope but split OCR, identity, routing, media, retention, and backup into dependency-ordered slices with entry-point/migration checks.
+6. **Medium: schema naming.** Map domain entity → Python model → physical table → owner → event key; do not rename delivered objects/revisions for consistency.
+7. **Medium: error handling.** Assign Capability 9.3's taxonomy/writer before receipt release; keep operational errors, business holds, and audit events distinct.
+8. **Medium: duplicated plan facts.** Rules/statuses repeat across docs; 169 manifest rows (147 PLANNED/22 VERIFIED), 117 lack commands. Date subordinate snapshots and keep authority in owning docs.
+9. **Low: MVP 4 table.** Repair the joined 4.2/4.3 row so boundaries are clear.
 
 ## Corrected Architecture
 
-Keep one deployable application with bounded contexts inside `src/mbs/`. Do not add microservices, a second frontend build, or a general plugin framework. A context owns its domain rules and persisted facts; other contexts call its service API rather than reading or mutating its ORM models directly. Create an abstraction only at an actual boundary (database transaction, file storage, OCR, Square, or Meta).
+Keep one deployable app with bounded contexts in `src/mbs/`; no microservices, second frontend build, or plugin framework. Contexts own rules/facts; others call services, not ORM tables. Abstract only real boundaries (transactions, files, OCR, Square, Meta).
 
 | Capability | Owns and writes | Does not own |
 |---|---|---|
@@ -71,16 +71,16 @@ This clarifies ownership and schema timing without changing approved business be
 
 ## Plan Governance and Completion Rules
 
-- Keep approved business rules in the owner decision register. This review clarifies component responsibility only; it does not approve a new business rule or override an approved decision.
-- Keep cross-cutting architecture in the overview and this boundary matrix; capability files define only their owned facts and service contracts. Roadmap prose describes stage outcomes. Slice specifications contain acceptance criteria; `03-current-slice.md` names the one active task and its evidence. The manifest tracks test traceability, not implementation authorization.
-- On conflict, stop before implementation and reconcile the owning decision/capability/slice artifacts. Do not copy a changed rule into every document; update the owner and the directly affected contracts, then record the change and affected tests.
-- A stage is complete only when its profile runs through real application entry points, PostgreSQL migrations and browser workflows; all producer/consumer contracts are exercised; errors/holds have a visible resolution path; and the manifest links verified tests and runnable commands. A passing component test alone is not stage evidence.
-- Preserve two independent gates: synthetic local predecessor readiness permits the next stage to be developed; production promotion requires the separately named privacy, provider, recovery, security, and owner approvals. Never make real-data approval a prerequisite for synthetic work unless the specific test would process private data.
+- Owner decisions remain business authority; this review clarifies technical ownership only.
+- Overview owns cross-cutting architecture; capability files own facts/contracts; roadmap defines stage outcomes; slice specs define acceptance; `03-current-slice.md` owns active task/evidence; manifest tracks tests, not authorization.
+- On conflict, stop and reconcile owning docs. Update only the owner and affected contracts; record changed tests.
+- Complete a stage only after real-entry-point profile, PG migrations, browser workflows, producer/consumer contracts, visible error/hold resolution, and manifest commands/results pass. Unit tests alone are insufficient.
+- Keep local-synthetic and production gates separate. Real-data approval never blocks synthetic work unless that test uses private data.
 
 ## Immediate Plan Reconciliation
 
-1. Keep the active queue at D-77 full candidate validation and critical review, then S13 timed restore/restart, then S18-local. Do not start MVP 2 until those gates pass.
-2. After D-77, S13, and S18-local pass and an MVP 2 slice is selected, copy the Capability 6 ledger and Capability 15 plan ownership contracts into that active slice; do not start this work ahead of the current queue.
-3. Keep Capability 9.3 as the owner of the error-log writer and taxonomy; verify its upload/OCR/import entry-point coverage as part of S18-local and the `receipt-mvp` profile rather than creating an unsequenced parallel task.
-4. Resolve or explicitly preserve each open readiness/owner gate (including RM-022 production policy, RM-023 field-authority/evidence, F43 branch identity, F44 shared-item allocation, private-corpus authorization, and PDF scanning); do not silently promote a conditional path to supported behavior.
-5. Bring manifest validation commands to 169 unique cases with actual commands/results as their test contracts. At this review, 117 rows still lack a validation command.
+1. Queue: D-77 candidate/review → S13 synthetic restore/restart → S18-local. Keep the timed production RPO/RTO drill as a separate promotion gate; do not start MVP 2 before S18-local.
+2. After these gates, copy Capability 6 ledger and Capability 15 plan ownership into the selected MVP 2 slice.
+3. Keep Capability 9.3 as error writer/taxonomy owner; verify upload/OCR/import entry points in S18-local/`receipt-mvp`, not a parallel task.
+4. Resolve or preserve RM-022 production policy, RM-023 authority/evidence, F43/F44, private-corpus approval, and PDF scanning. Do not silently promote conditional behavior.
+5. Add actual commands/results to all 169 unique manifest cases; 117 currently lack commands.

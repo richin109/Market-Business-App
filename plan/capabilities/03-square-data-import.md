@@ -1,15 +1,15 @@
 # Capability 3: Square Platform Integration
 
-Database support: PostgreSQL only; follow [D-77's shared contract](../00-overview.md#postgresql-contract-all-stages).
-- [ ] Test staging JSON, provider uniqueness, atomic cursor/row commit, rollback/retry with independent sessions, and UTC/business dates; provider calls stay outside locked transactions.
+Database: PostgreSQL only; see [D-77](../00-overview.md#postgresql-contract-all-stages).
+- [ ] Test JSON staging, provider uniqueness, atomic cursor/row commit, independent-session rollback/retry, UTC/business dates; call providers outside locked transactions.
 
 - [ ] **Capability complete** (all features below checked)
 
-Bounded context: `src/mbs/integrations/square/` (blueprint §8, §9.4). Owns Square credentials, Catalog/Orders/Payments API access, raw staging, cursor management, and provider sync logs. Accepted Square sales facts, COGS, and market assignment belong to Capability 14. The Square app/POS outside MBS captures every actual sale.
+Bounded context: `src/mbs/integrations/square/` (blueprint §8, §9.4). Owns credentials, API access, staging, cursors, sync logs. Capability 14 owns accepted sales/COGS/market attribution. Square POS captures all sales.
 
-Square's separate app/POS captures all payments outside MBS. MVP 2 imports Catalog only; this integration begins Orders/Payments staging in MVP 3 and never initiates checkout or creates a separate sales system. D-16 data attribution is approved. Once sales activation begins, a missing provider identity or ambiguous visit match remains an import exception rather than an invented local sale.
+Square POS captures all payments. MVP 2 stages Catalog only; Orders/Payments begin MVP 3. Never checkout or create another sales system. D-16 applies; missing identity/ambiguous visit stays an exception, never a local sale.
 
-**Blocking Square API gate:** MBS must never create, update, delete, cancel, refund, or otherwise attempt to change any data in Square. This applies to every app path, background job, admin action, retry, and test using a Square connection. All Square access goes through one provider adapter with an explicit allowlist of approved read-only API operations; reject unknown or mutating operations locally before any network request. HTTP `POST` is permitted only for documented read-only search operations on that allowlist (for example, Orders/Catalog search), never as a general write permission. The app's own `POST /api/v1/integrations/square/sync` starts a local read/import job and does not authorize a provider write. Changes to Square data are made only outside MBS in Square's own tools.
+**Blocking read-only gate:** no MBS path/job/admin/retry/test may mutate Square. One allowlist adapter rejects unknown/writes before network. POST is only for approved read searches, never general writes. MBS `POST /api/v1/integrations/square/sync` starts local read/import only. Change Square externally.
 
 ## Feature 3.1 — Square Account & API Access 🧑‍💻 User Input Required
 - [ ] Feature complete
