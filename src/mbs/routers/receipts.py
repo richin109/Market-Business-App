@@ -1,63 +1,36 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from datetime import date, time
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.sql.elements import ColumnElement
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.responses import Response
 
 from mbs.db import get_session
+from mbs.errors import ConflictError, NotFoundError, UnavailableError, UnsupportedMediaError
 from mbs.models import (
-    AuditLog,
     AuthSession,
-    Item,
-    MediaAsset,
-    MediaAssetLink,
-    Receipt,
-    ReceiptCorrectionHold,
-    ReceiptItem,
-    ReceiptLineApproval,
-    ReceiptRoutingRecord,
-    ReceiptSource,
-    ReceiptUpload,
-    Store,
-    StoreItem,
     User,
 )
 from mbs.receipts.approval import (
-    ApprovalResult,
     DispositionSubtype,
-    approve_receipt_item,
-    reclassify_expense_routing,
     validate_disposition_pair,
 )
 from mbs.receipts.corrections import (
     HoldResolutionAction,
-    resolve_correction_hold,
-    review_receipt,
 )
-from mbs.receipts.lifecycle import soft_delete_receipt
-from mbs.receipts.manual import create_manual_receipt
+from mbs.receipts.dispatch import request_outbox_dispatch as _request_outbox_dispatch
 from mbs.receipts.ocr import BusinessDisposition
-from mbs.receipts.rules import RememberedItemRule, RuleMatchKind, find_item_rule
 from mbs.receipts.sources import (
     SourceDecision,
-    decide_receipt_source,
-    repeated_source_line_indexes,
 )
-from mbs.receipts.tasks import dispatch_pending_receipt_uploads
-from mbs.receipts.units import UNIT_ALIASES
 from mbs.receipts.upload import ReceiptUploadService, UploadStatus
 from mbs.routers.dependencies import (
     BoundedUpload,
@@ -69,6 +42,19 @@ from mbs.routers.dependencies import (
     get_receipt_upload_service,
     manager_csrf_session,
     manager_session,
+)
+from mbs.services import receipt_commands, receipt_images
+from mbs.services.receipt_reads import (
+    list_receipt_responses,
+    manual_receipt_stores,
+    receipt_items_response,
+    receipt_response,
+)
+from mbs.services.receipt_review import receipt_review_context
+from mbs.services.receipt_upload_commands import (
+    ReceiptUploadBatch,
+    resolve_near_match_and_complete,
+    upload_and_complete,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["receipts"])
@@ -180,15 +166,10 @@ def manual_receipt_page(
     _current: tuple[User, AuthSession] = Depends(manager_session),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> Response:
-    stores = session.scalars(
-        select(Store)
-        .where(Store.is_active.is_(True), Store.superseded_by_store_id.is_(None))
-        .order_by(Store.display_name, Store.store_id)
-    ).all()
     return templates.TemplateResponse(
         request=request,
         name="manual_receipt.html",
-        context={"stores": stores},
+        context={"stores": manual_receipt_stores(session)},
     )
 
 
@@ -224,9 +205,7 @@ async def upload_receipt_batch(
 
     form = await request.form(max_files=MAX_BATCH_FILES, max_fields=0, max_part_size=1024)
     files = [
-        (key, value)
-        for key, value in form.multi_items()
-        if isinstance(value, StarletteUploadFile)
+        (key, value) for key, value in form.multi_items() if isinstance(value, StarletteUploadFile)
     ]
     if len(files) != len(form.multi_items()) or any(key != "files" for key, _ in files):
         await form.close()
@@ -238,53 +217,20 @@ async def upload_receipt_batch(
         await form.close()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files selected")
 
-    results: list[dict[str, object]] = []
-    accepted_uploads: list[str] = []
-    total_bytes = 0
+    batch = ReceiptUploadBatch(service, user.id, MAX_BATCH_BYTES)
     try:
         for index, (_, file) in enumerate(files, start=1):
             filename = Path((file.filename or f"file-{index}").replace("\\", "/")).name
-            result: dict[str, object] = {"filename": filename, "status": "INVALID"}
             if file.size is not None and file.size > service.max_file_bytes:
-                result.update(status="TOO_LARGE", detail="File exceeds the per-file size limit")
-                results.append(result)
+                batch.reject_file(filename, "TOO_LARGE", "File exceeds the per-file size limit")
                 continue
             source = await file.read(service.max_file_bytes + 1)
-            if len(source) > service.max_file_bytes:
-                result.update(status="TOO_LARGE", detail="File exceeds the per-file size limit")
-                results.append(result)
-                continue
-            if total_bytes + len(source) > MAX_BATCH_BYTES:
-                result.update(status="BATCH_LIMIT_EXCEEDED", detail="Batch exceeds the size limit")
-                results.append(result)
-                continue
-            total_bytes += len(source)
-            media_type = file.content_type or ""
-            try:
-                upload_result = service.upload(session, source, media_type, user.id)
-            except ValueError as error:
-                result.update(status="INVALID", detail=str(error))
-                results.append(result)
-                continue
-
-            result.update(
-                status=upload_result.status.value,
-                upload_pk=upload_result.upload_pk,
-                source_sha256=upload_result.source_sha256,
-                idempotent=upload_result.idempotent,
-            )
-            if upload_result.status is UploadStatus.QUEUED and upload_result.upload_pk is not None:
-                accepted_uploads.append(upload_result.upload_pk)
-            results.append(result)
-        session.commit()
+            batch.add_file(session, filename, source, file.content_type or "")
+        batch.commit(session)
     finally:
         await form.close()
 
-    for upload_pk in accepted_uploads:
-        service.index_committed_upload(session, upload_pk)
-    if accepted_uploads:
-        _request_outbox_dispatch()
-    return {"file_count": len(results), "total_bytes": total_bytes, "files": results}
+    return batch.finish(session, _request_outbox_dispatch)
 
 
 @router.post("/receipts/manual", status_code=status.HTTP_201_CREATED)
@@ -295,36 +241,9 @@ def enter_manual_receipt(
 ) -> dict[str, object]:
     user, _ = current
     try:
-        receipt = create_manual_receipt(
-            session,
-            user,
-            store_id=payload.store_id,
-            receipt_date=payload.receipt_date,
-            vendor_reference=payload.vendor_reference,
-            receipt_time=payload.receipt_time,
-            subtotal=payload.subtotal,
-            tax=payload.tax,
-            total=payload.total,
-            payment_method=payload.payment_method,
-            lines=[line.model_dump() for line in payload.items],
-            source_event_id=payload.source_event_id,
-        )
+        return receipt_commands.enter_manual_receipt(session, user, payload.model_dump())
     except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    session.commit()
-    receipt_items = session.scalars(
-        select(ReceiptItem)
-        .where(ReceiptItem.receipt_pk == receipt.receipt_pk)
-        .order_by(ReceiptItem.id)
-    ).all()
-    store_items = _store_items_for_lines(session, receipt_items)
-    return {
-        "receipt_pk": receipt.receipt_pk,
-        "receipt_id": receipt.receipt_id,
-        "source_type": receipt.source_type,
-        "item_count": len(payload.items),
-        "items": _manual_item_responses(receipt_items, store_items),
-    }
+        raise domain_http_error(error, 422) from error
 
 
 @router.get("/receipts")
@@ -340,40 +259,7 @@ def list_receipts(
 ) -> list[dict[str, object]]:
     if page < 1 or page_size < 1 or page_size > 100:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid pagination")
-    filters: list[ColumnElement[bool]] = [Receipt.deleted_at.is_(None)]
-    if store is not None:
-        filters.append(Receipt.store == store)
-    if store_id is not None:
-        filters.append(Receipt.store_id == store_id)
-    if date_from is not None:
-        filters.append(Receipt.receipt_date >= date_from)
-    if date_to is not None:
-        filters.append(Receipt.receipt_date <= date_to)
-    item_counts = (
-        select(ReceiptItem.receipt_pk, func.count(ReceiptItem.id).label("item_count"))
-        .where(ReceiptItem.is_excluded.is_(False))
-        .group_by(ReceiptItem.receipt_pk)
-        .subquery()
-    )
-    receipt_rows = session.execute(
-        select(Receipt, func.coalesce(item_counts.c.item_count, 0))
-        .outerjoin(item_counts, item_counts.c.receipt_pk == Receipt.receipt_pk)
-        .where(*filters)
-        .order_by(Receipt.receipt_date.desc(), Receipt.receipt_id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    ).all()
-    return [
-        {
-            "receipt_pk": receipt.receipt_pk,
-            "receipt_id": receipt.receipt_id,
-            "store": receipt.store,
-            "store_id": receipt.store_id,
-            "purchase_date": receipt.receipt_date.isoformat(),
-            "item_count": item_count,
-        }
-        for receipt, item_count in receipt_rows
-    ]
+    return list_receipt_responses(session, store, store_id, date_from, date_to, page, page_size)
 
 
 @router.get("/receipts/{receipt_pk}")
@@ -382,21 +268,10 @@ def get_receipt(
     _current: tuple[User, AuthSession] = Depends(current_session_user),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, object]:
-    receipt = session.scalar(
-        select(Receipt).where(Receipt.receipt_pk == receipt_pk, Receipt.deleted_at.is_(None))
-    )
-    if receipt is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
-    items = session.scalars(
-        select(ReceiptItem).where(ReceiptItem.receipt_pk == receipt_pk).order_by(ReceiptItem.id)
-    ).all()
-    store_items = _store_items_for_lines(session, items)
-    sources = session.scalars(
-        select(ReceiptSource)
-        .where(ReceiptSource.receipt_pk == receipt_pk)
-        .order_by(ReceiptSource.id)
-    ).all()
-    return _receipt_response(receipt, items, store_items, sources)
+    try:
+        return receipt_response(session, receipt_pk)
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
 
 @router.delete("/receipts/{receipt_pk}")
@@ -408,11 +283,9 @@ def delete_receipt(
 ) -> dict[str, object]:
     user, _ = current
     try:
-        deleted = soft_delete_receipt(session, receipt_pk, user.id, payload.reason)
+        return receipt_commands.delete_receipt(session, user, receipt_pk, payload.model_dump())
     except ValueError as error:
-        raise domain_http_error(error, status.HTTP_409_CONFLICT) from error
-    session.commit()
-    return {"receipt_pk": receipt_pk, "deleted": True, "idempotent": not deleted}
+        raise domain_http_error(error, 409) from error
 
 
 @router.get("/receipts/{receipt_pk}/sources/{source_id}/content")
@@ -423,41 +296,24 @@ def get_receipt_source_content(
     service: ReceiptUploadService = Depends(get_receipt_upload_service),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> Response:
-    source_row = session.execute(
-        select(ReceiptSource, ReceiptUpload)
-        .join(ReceiptUpload, ReceiptUpload.upload_pk == ReceiptSource.upload_pk)
-        .join(Receipt, Receipt.receipt_pk == ReceiptSource.receipt_pk)
-        .where(
-            ReceiptSource.id == source_id,
-            ReceiptSource.receipt_pk == receipt_pk,
-            Receipt.deleted_at.is_(None),
-        )
-    ).one_or_none()
-    if source_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Receipt source not found"
-        )
-    _, upload = source_row
-    if upload.media_type not in {"application/pdf", "image/jpeg", "image/png"}:
-        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
     try:
-        content = service.read_protected_source(upload.file_key)
-    except FileNotFoundError as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Protected source is unavailable"
-        ) from error
-    except (OSError, RuntimeError, ValueError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Source viewing unavailable"
-        ) from error
+        content, media_type = receipt_images.get_receipt_source_content(
+            session, service, receipt_pk, source_id
+        )
+    except NotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except UnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except UnsupportedMediaError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
     return Response(
         content,
-        media_type=upload.media_type,
+        media_type=media_type,
         headers={
             "Cache-Control": "private, no-store, max-age=0",
-            "Content-Disposition": "inline; filename=receipt-source",
             "X-Content-Type-Options": "nosniff",
             "Cross-Origin-Resource-Policy": "same-origin",
+            "Content-Disposition": "inline; filename=receipt-source",
         },
     )
 
@@ -468,30 +324,10 @@ def get_receipt_items(
     _current: tuple[User, AuthSession] = Depends(current_session_user),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> list[dict[str, object]]:
-    receipt = session.scalar(
-        select(Receipt).where(Receipt.receipt_pk == receipt_pk, Receipt.deleted_at.is_(None))
-    )
-    if receipt is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
-    items = session.scalars(
-        select(ReceiptItem).where(ReceiptItem.receipt_pk == receipt_pk).order_by(ReceiptItem.id)
-    ).all()
-    store_items = _store_items_for_lines(session, items)
-    response_items: list[dict[str, object]] = []
-    for item in items:
-        store_item = store_items.get(item.store_item_id) if item.store_item_id is not None else None
-        response_items.append(
-            {
-                **_item_response(item, store_item, receipt.source_type),
-                "remembered_disposition": (
-                    store_item.last_disposition if store_item is not None else None
-                ),
-                "remembered_disposition_subtype": (
-                    store_item.last_disposition_subtype if store_item is not None else None
-                ),
-            }
-        )
-    return response_items
+    try:
+        return receipt_items_response(session, receipt_pk)
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
 
 @router.post("/receipts/{receipt_pk}/sources/{source_id}/decision")
@@ -504,28 +340,11 @@ def decide_receipt_source_route(
 ) -> dict[str, object]:
     user, _ = current
     try:
-        result = decide_receipt_source(
-            session,
-            receipt_pk,
-            source_id,
-            user.id,
-            payload.decision,
-            payload.reason,
-            payload.source_event_id,
-            payload.confirmed_repeated_line_indexes,
+        return receipt_commands.decide_receipt_source_route(
+            session, user, receipt_pk, source_id, payload.model_dump()
         )
     except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    session.commit()
-    return {
-        "receipt_pk": receipt_pk,
-        "source_id": source_id,
-        "association_kind": result.source.association_kind,
-        "added_line_count": result.added_line_count,
-        "held": result.held,
-        "hold_reason": result.source.hold_reason,
-        "idempotent": result.idempotent,
-    }
+        raise domain_http_error(error, 409) from error
 
 
 @router.get(
@@ -539,39 +358,19 @@ def get_receipt_image_candidate_thumbnail(
     service: ReceiptUploadService = Depends(get_receipt_upload_service),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> Response:
-    row = session.execute(
-        select(MediaAssetLink, MediaAsset)
-        .join(MediaAsset, MediaAsset.asset_sha256 == MediaAssetLink.asset_sha256)
-        .join(ReceiptSource, ReceiptSource.id == MediaAssetLink.source_id)
-        .join(Receipt, Receipt.receipt_pk == ReceiptSource.receipt_pk)
-        .where(
-            MediaAssetLink.id == candidate_id,
-            MediaAssetLink.owner_kind == "RECEIPT_LINE_CANDIDATE",
-            ReceiptSource.receipt_pk == receipt_pk,
-            ReceiptSource.association_kind != "REJECTED",
-            Receipt.deleted_at.is_(None),
-        )
-    ).one_or_none()
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Image candidate not found"
-        )
-    _, asset = row
-    if asset.ingest_status != "READY":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Image candidate is not ready",
-        )
     try:
-        content = service.read_protected_source(asset.thumbnail_file_key)
-    except (OSError, RuntimeError, ValueError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Protected image candidate is unavailable",
-        ) from error
+        content, media_type = receipt_images.get_receipt_image_candidate_thumbnail(
+            session, service, receipt_pk, candidate_id
+        )
+    except NotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except UnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except UnsupportedMediaError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
     return Response(
         content,
-        media_type=asset.thumbnail_media_type,
+        media_type=media_type,
         headers={
             "Cache-Control": "private, no-store, max-age=0",
             "X-Content-Type-Options": "nosniff",
@@ -589,216 +388,16 @@ def decide_receipt_image_candidate(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, object]:
     user, _ = current
-    receipt = session.scalar(
-        select(Receipt)
-        .where(Receipt.receipt_pk == receipt_pk, Receipt.deleted_at.is_(None))
-        .with_for_update()
-    )
-    if receipt is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Image candidate not found"
-        )
-    candidate = session.scalar(
-        select(MediaAssetLink)
-        .join(ReceiptSource, ReceiptSource.id == MediaAssetLink.source_id)
-        .where(
-            MediaAssetLink.id == candidate_id,
-            MediaAssetLink.owner_kind == "RECEIPT_LINE_CANDIDATE",
-            ReceiptSource.receipt_pk == receipt_pk,
-            ReceiptSource.association_kind != "REJECTED",
-        )
-        .with_for_update()
-    )
-    if candidate is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Image candidate not found"
-        )
-    if payload.decision == "REJECT":
-        reason = (payload.reason or "").strip()
-        if not reason:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A rejection reason is required",
-            )
-        if candidate.status == "REJECTED":
-            return {"candidate_id": candidate.id, "status": candidate.status, "idempotent": True}
-        if candidate.status != "PENDING":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Candidate is already confirmed"
-            )
-        candidate.status = "REJECTED"
-        candidate.rejection_reason = reason
-        session.add(
-            AuditLog(
-                event_type="RECEIPT_IMAGE_CANDIDATE_REJECTED",
-                actor=str(user.id),
-                entity_type="MediaAssetLink",
-                entity_id=str(candidate.id),
-                details=f"source_id={candidate.source_id}; reason_required=true",
-            )
-        )
-        session.commit()
-        return {"candidate_id": candidate.id, "status": candidate.status, "idempotent": False}
-
-    if candidate.status == "CONFIRMED":
-        return {"candidate_id": candidate.id, "status": candidate.status, "idempotent": True}
-    if candidate.status != "PENDING":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Rejected candidate cannot be confirmed",
-        )
-    current_line = (
-        session.scalar(
-            select(ReceiptItem)
-            .where(
-                ReceiptItem.id == candidate.receipt_item_id,
-                ReceiptItem.receipt_pk == receipt_pk,
-            )
-            .with_for_update()
-        )
-        if candidate.receipt_item_id is not None
-        else None
-    )
-    if current_line is not None and payload.receipt_item_id not in {None, current_line.id}:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An associated image candidate cannot be reassigned to another line",
-        )
-    receipt_item_id = payload.receipt_item_id or candidate.receipt_item_id
-    line: ReceiptItem | None = current_line
-    if receipt_item_id is not None and (line is None or line.id != receipt_item_id):
-        line = session.scalar(
-            select(ReceiptItem)
-            .where(
-                ReceiptItem.id == receipt_item_id,
-                ReceiptItem.receipt_pk == receipt_pk,
-            )
-            .with_for_update()
-        )
-    if line is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Choose a receipt line before confirming this image",
-        )
-    store_item = (
-        session.scalar(
-            select(StoreItem).where(StoreItem.store_item_id == line.store_item_id).with_for_update()
-        )
-        if line.store_item_id is not None
-        else None
-    )
-    if line.store_item_id is not None and store_item is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The receipt line's store item is unavailable",
-        )
-    owner_kind: str
-    owner_id: str | None
-    if store_item is not None and store_item.mapping_confirmed and line.item_id is not None:
-        owner_kind, owner_id = "ITEM", line.item_id
-    elif store_item is not None:
-        owner_kind, owner_id = "STORE_ITEM", store_item.store_item_id
-    else:
-        owner_kind, owner_id = "ITEM", line.item_id
-    if owner_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Map this receipt line before confirming its image",
-        )
-    owner_model = Item if owner_kind == "ITEM" else StoreItem
-    owner_key = "item_id" if owner_kind == "ITEM" else "store_item_id"
-    owner = session.scalar(
-        select(owner_model)
-        .where(getattr(owner_model, owner_key) == str(owner_id))
-        .with_for_update()
-    )
-    if owner is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The receipt line's item mapping is unavailable",
-        )
-    primary = session.scalar(
-        select(MediaAssetLink)
-        .where(
-            MediaAssetLink.owner_kind == owner_kind,
-            MediaAssetLink.owner_id == str(owner_id),
-            MediaAssetLink.status == "CONFIRMED",
-            MediaAssetLink.is_primary.is_(True),
-            MediaAssetLink.detached_at.is_(None),
-        )
-        .with_for_update()
-    )
-    same_asset = session.scalar(
-        select(MediaAssetLink)
-        .where(
-            MediaAssetLink.owner_kind == owner_kind,
-            MediaAssetLink.owner_id == str(owner_id),
-            MediaAssetLink.asset_sha256 == candidate.asset_sha256,
-            MediaAssetLink.status == "CONFIRMED",
-            MediaAssetLink.detached_at.is_(None),
-        )
-        .with_for_update()
-    )
-    if same_asset is None and primary is not None and payload.replace_primary is None:
-        session.rollback()
-        return {
-            "candidate_id": candidate_id,
-            "replace_prompt_required": True,
-            "primary_label": owner_kind,
-        }
-    replace_primary = payload.replace_primary is True
-    becomes_primary = (
-        same_asset.is_primary if same_asset is not None else primary is None or replace_primary
-    )
     try:
-        with session.begin_nested():
-            if primary is not None and same_asset is None and replace_primary:
-                primary.is_primary = False
-            if same_asset is not None and primary is None:
-                same_asset.is_primary = True
-            candidate.status = "CONFIRMED"
-            if candidate.receipt_item_id is None:
-                candidate.receipt_item_id = line.id
-            if same_asset is None:
-                session.add(
-                    MediaAssetLink(
-                        asset_sha256=candidate.asset_sha256,
-                        owner_kind=owner_kind,
-                        owner_id=str(owner_id),
-                        status="CONFIRMED",
-                        is_primary=becomes_primary,
-                        source_id=candidate.source_id,
-                        receipt_item_id=line.id,
-                        source_page=candidate.source_page,
-                        source_region=candidate.source_region,
-                        created_by=user.id,
-                    )
-                )
-            session.add(
-                AuditLog(
-                    event_type="RECEIPT_IMAGE_CANDIDATE_CONFIRMED",
-                    actor=str(user.id),
-                    entity_type="MediaAssetLink",
-                    entity_id=str(candidate.id),
-                    details=(
-                        f"receipt_item_id={line.id}; owner_kind={owner_kind}; "
-                        f"is_primary={becomes_primary}"
-                    ),
-                )
-            )
-            session.flush()
-    except IntegrityError as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The primary image changed; refresh and review this candidate again",
-        ) from error
-    session.commit()
-    return {
-        "candidate_id": candidate.id,
-        "status": candidate.status,
-        "is_primary": becomes_primary,
-        "idempotent": False,
-    }
+        return receipt_images.decide_receipt_image_candidate(
+            session, user, receipt_pk, candidate_id, payload.model_dump()
+        )
+    except NotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.get("/receipts/{receipt_pk}/review", include_in_schema=False)
@@ -808,318 +407,11 @@ def receipt_review_page(
     _current: tuple[User, AuthSession] = Depends(manager_session),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> Response:
-    receipt = session.scalar(
-        select(Receipt).where(Receipt.receipt_pk == receipt_pk, Receipt.deleted_at.is_(None))
-    )
-    if receipt is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
-    raw_extraction = receipt.raw_ocr_document.get("extraction")
-    raw_header = receipt.raw_ocr_document.get("receipt")
-    extraction_evidence = {
-        "field_candidates": (
-            raw_extraction.get("field_candidates", {})
-            if isinstance(raw_extraction, dict)
-            else {}
-        ),
-        "issues": raw_extraction.get("issues", [])
-        if isinstance(raw_extraction, dict)
-        else [],
-        "references": (
-            raw_header.get("reference_candidates", {}) if isinstance(raw_header, dict) else {}
-        ),
-        "card_last_four": (
-            raw_header.get("card_last_four") if isinstance(raw_header, dict) else None
-        ),
-    }
-    raw_confidences = (
-        raw_extraction.get("field_confidence") if isinstance(raw_extraction, dict) else None
-    )
-    low_confidence_fields: set[str] = set()
-    if isinstance(raw_confidences, dict):
-        for field, value in raw_confidences.items():
-            try:
-                if Decimal(str(value)) < Decimal("0.62"):
-                    low_confidence_fields.add(str(field))
-            except (InvalidOperation, ValueError):
-                continue
-    raw_missing_fields = (
-        raw_extraction.get("missing_fields") if isinstance(raw_extraction, dict) else None
-    )
-    missing_fields = (
-        {field for field in raw_missing_fields if isinstance(field, str)}
-        if isinstance(raw_missing_fields, list)
-        else set()
-    )
-    attention_fields = low_confidence_fields | missing_fields
-    lines = session.scalars(
-        select(ReceiptItem).where(ReceiptItem.receipt_pk == receipt_pk).order_by(ReceiptItem.id)
-    ).all()
-    store_items = _store_items_for_lines(session, lines)
-    item_ids = {line.item_id for line in lines if line.item_id is not None}
-    canonical_items = {
-        item.item_id: item
-        for item in session.scalars(select(Item).where(Item.item_id.in_(item_ids)))
-    }
-    line_ids = [line.id for line in lines]
-    approvals = {
-        approval.receipt_item_id: approval
-        for approval in session.scalars(
-            select(ReceiptLineApproval)
-            .where(ReceiptLineApproval.receipt_item_id.in_(line_ids))
-            .order_by(ReceiptLineApproval.approval_version)
-        )
-    }
-    source_rows = session.execute(
-        select(ReceiptSource, ReceiptUpload)
-        .join(ReceiptUpload, ReceiptUpload.upload_pk == ReceiptSource.upload_pk)
-        .where(ReceiptSource.receipt_pk == receipt_pk)
-        .order_by(ReceiptSource.id)
-    ).all()
-    source_views: list[dict[str, object]] = []
-    for source, upload in source_rows:
-        source_items = source.extracted_document.get("items")
-        repeated_indexes = (
-            repeated_source_line_indexes(lines, source_items, store_items)
-            if source.association_kind == "PENDING"
-            else ()
-        )
-        repeated_lines: list[dict[str, object]] = []
-        if isinstance(source_items, list):
-            for source_line_index in repeated_indexes:
-                candidate = source_items[source_line_index]
-                if isinstance(candidate, dict):
-                    repeated_lines.append(
-                        {
-                            "index": source_line_index,
-                            "description": candidate.get("description", "Unlabelled line"),
-                            "store_product_id": candidate.get("store_product_id"),
-                            "upc": candidate.get("upc"),
-                            "source_page": candidate.get("source_page") or 1,
-                            "source_line_number": candidate.get("source_line_number")
-                            or source_line_index + 1,
-                        }
-                    )
-        source_views.append(
-            {
-                "id": source.id,
-                "kind": source.association_kind,
-                "media_type": upload.media_type,
-                "page_count": max(upload.page_count or 1, 1),
-                "content_url": (f"/api/v1/receipts/{receipt_pk}/sources/{source.id}/content"),
-                "repeated_lines": repeated_lines,
-            }
-        )
-    candidates_by_line: dict[int, list[dict[str, object]]] = {}
-    unassigned_image_candidates: list[dict[str, object]] = []
-    source_ids = [source.id for source, _ in source_rows]
-    if source_ids:
-        candidate_rows = session.execute(
-            select(MediaAssetLink, MediaAsset)
-            .join(MediaAsset, MediaAsset.asset_sha256 == MediaAssetLink.asset_sha256)
-            .join(ReceiptSource, ReceiptSource.id == MediaAssetLink.source_id)
-            .where(
-                MediaAssetLink.owner_kind == "RECEIPT_LINE_CANDIDATE",
-                MediaAssetLink.source_id.in_(source_ids),
-                ReceiptSource.association_kind != "REJECTED",
-            )
-            .order_by(MediaAssetLink.id)
-        ).all()
-        for candidate, _asset in candidate_rows:
-            candidate_view: dict[str, object] = {
-                "id": candidate.id,
-                "source_id": candidate.source_id,
-                "status": candidate.status,
-                "reason": candidate.rejection_reason,
-                "page": candidate.source_page,
-                "region": candidate.source_region,
-                "thumbnail_url": (
-                    f"/api/v1/receipts/{receipt_pk}/image-candidates/{candidate.id}/thumbnail"
-                ),
-            }
-            if candidate.receipt_item_id in line_ids:
-                candidates_by_line.setdefault(candidate.receipt_item_id, []).append(candidate_view)
-            else:
-                unassigned_image_candidates.append(candidate_view)
-    review_lines: list[dict[str, object]] = []
-    remembered_items = {
-        remembered.store_item_id: remembered
-        for remembered in session.scalars(
-            select(StoreItem).where(
-                StoreItem.store_id == receipt.store_id,
-                StoreItem.last_disposition.is_not(None),
-            )
-        )
-        if remembered.last_disposition is not None
-    }
-    remembered_rules = tuple(
-        RememberedItemRule(
-            store_item_id=remembered.store_item_id,
-            vendor=receipt.store,
-            description=remembered.latest_description,
-            disposition=BusinessDisposition(remembered.last_disposition),
-            upc=remembered.upc,
-        )
-        for remembered in remembered_items.values()
-        if remembered.last_disposition is not None
-    )
-    raw_item_candidates = (
-        raw_extraction.get("item_candidates", {}) if isinstance(raw_extraction, dict) else {}
-    )
-    native_item_candidates = (
-        raw_item_candidates.get("native", [])
-        if isinstance(raw_item_candidates, dict)
-        else []
-    )
-    ocr_item_candidates = (
-        raw_item_candidates.get("ocr", []) if isinstance(raw_item_candidates, dict) else []
-    )
-    for line_index, line in enumerate(lines):
-        raw_item = line.raw_ocr_item if isinstance(line.raw_ocr_item, dict) else {}
-        native_item = (
-            native_item_candidates[line_index]
-            if isinstance(native_item_candidates, list)
-            and line_index < len(native_item_candidates)
-            and isinstance(native_item_candidates[line_index], dict)
-            else {}
-        )
-        ocr_item = (
-            ocr_item_candidates[line_index]
-            if isinstance(ocr_item_candidates, list)
-            and line_index < len(ocr_item_candidates)
-            and isinstance(ocr_item_candidates[line_index], dict)
-            else {}
-        )
-        store_item = store_items.get(line.store_item_id) if line.store_item_id is not None else None
-        canonical_item = canonical_items.get(line.item_id) if line.item_id is not None else None
-        approval = approvals.get(line.id)
-        primary = line.business_disposition
-        subtype = line.disposition_subtype
-        rule_suggestion: str | None = None
-        if primary == BusinessDisposition.UNCLASSIFIED.value and store_item is not None:
-            primary = store_item.last_disposition or primary
-            subtype = store_item.last_disposition_subtype or "NONE"
-        if (
-            primary == BusinessDisposition.UNCLASSIFIED.value
-            and approval is None
-            and not line.is_excluded
-        ):
-            rule_match = find_item_rule(
-                remembered_rules, receipt.store, line.description, line.upc, line.store_item_id
-            )
-            if rule_match is not None:
-                labels = sorted({rule.disposition.value for rule in rule_match.candidates})
-                upc_rule = (
-                    rule_match.rule
-                    if rule_match.kind is RuleMatchKind.EXACT
-                    and rule_match.rule is not None
-                    and line.upc is not None
-                    and rule_match.rule.upc == line.upc
-                    else None
-                )
-                if upc_rule is not None:
-                    remembered_item = remembered_items[upc_rule.store_item_id]
-                    primary = upc_rule.disposition.value
-                    subtype = remembered_item.last_disposition_subtype or "NONE"
-                prefix = (
-                    "Matches a remembered item: "
-                    if rule_match.kind is RuleMatchKind.EXACT
-                    else "Ambiguous remembered matches: "
-                )
-                rule_suggestion = prefix + ", ".join(
-                    label.replace("_", " ").title() for label in labels
-                )
-        review_lines.append(
-            {
-                "id": line.id,
-                "description": line.description,
-                "extraction_evidence": {
-                    "merchant_item_number": raw_item.get("store_product_id")
-                    or raw_item.get("identifier_candidate"),
-                    "upc": raw_item.get("upc"),
-                    "printed_size": raw_item.get("printed_size"),
-                    "quantity": raw_item.get("quantity"),
-                    "weight_lb": raw_item.get("weight_lb"),
-                    "raw_line_text": raw_item.get("raw_line_text"),
-                    "native_candidate": native_item,
-                    "ocr_candidate": ocr_item,
-                },
-                "image_candidates": candidates_by_line.get(line.id, []),
-                "rule_suggestion": rule_suggestion,
-                "display_name": (
-                    (store_item.common_name if store_item is not None else None)
-                    or (canonical_item.common_name if canonical_item is not None else None)
-                    or line.description
-                ),
-                "store_product_id": (
-                    store_item.store_product_id if store_item is not None else None
-                ),
-                "identifier_source": (
-                    store_item.identifier_source if store_item is not None else None
-                ),
-                "mapping_confirmed": (
-                    store_item.mapping_confirmed if store_item is not None else False
-                ),
-                "category": line.category,
-                "quantity": str(line.quantity) if line.quantity is not None else None,
-                "weight_lb": str(line.weight_lb) if line.weight_lb is not None else None,
-                "package_count": (
-                    str(line.package_count) if line.package_count is not None else None
-                ),
-                "pack_size": str(line.pack_size) if line.pack_size is not None else None,
-                "pack_unit": line.pack_unit,
-                "remembered_pack_size": (
-                    str(store_item.remembered_pack_size)
-                    if store_item is not None and store_item.remembered_pack_size is not None
-                    else None
-                ),
-                "remembered_pack_unit": (
-                    store_item.remembered_pack_unit if store_item is not None else None
-                ),
-                "package_suggestion": (
-                    line.pack_size is None
-                    and store_item is not None
-                    and store_item.remembered_pack_size is not None
-                    and store_item.remembered_pack_unit is not None
-                ),
-                "has_store_item": store_item is not None,
-                "store_item_id": line.store_item_id,
-                "package_review_warning": (
-                    line.package_count is None or line.pack_size is None or line.pack_unit is None
-                ),
-                "low_confidence": (
-                    "items" in low_confidence_fields
-                    or (line.ocr_confidence is not None and line.ocr_confidence < Decimal("0.62"))
-                ),
-                "upc": line.upc,
-                "unit_price": str(line.unit_price) if line.unit_price is not None else None,
-                "line_total": str(line.line_total),
-                "is_excluded": line.is_excluded,
-                "exclusion_reason": line.exclusion_reason,
-                "business_disposition": primary,
-                "disposition_subtype": subtype,
-                "approved": approval is not None,
-                "posting_status": approval.posting_status if approval is not None else None,
-                "posting_kind": approval.posting_kind if approval is not None else None,
-            }
-        )
-    return templates.TemplateResponse(
-        request=request,
-        name="receipt_review.html",
-        context={
-            "receipt": receipt,
-            "lines": review_lines,
-            "sources": source_views,
-            "unassigned_image_candidates": unassigned_image_candidates,
-            "dispositions": [item.value for item in BusinessDisposition],
-            "corrections_locked": bool(approvals),
-            "unit_aliases": UNIT_ALIASES,
-            "attention_fields": attention_fields,
-            "extraction_evidence": extraction_evidence,
-            "total_mismatch": receipt.receipt_document.get("total_mismatch") is True,
-            "can_add_line": receipt.source_type == "MANUAL"
-            or any(source["kind"] in {"PRIMARY", "SUPPLEMENT"} for source in source_views),
-        },
-    )
+    try:
+        context = receipt_review_context(session, receipt_pk)
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    return templates.TemplateResponse(request=request, name="receipt_review.html", context=context)
 
 
 @router.post("/receipts/{receipt_pk}/items/{receipt_item_id}/approval")
@@ -1131,50 +423,12 @@ def approve_receipt_line(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, object]:
     user, _ = current
-    line_exists = session.scalar(
-        select(ReceiptItem.id).where(
-            ReceiptItem.id == receipt_item_id,
-            ReceiptItem.receipt_pk == receipt_pk,
-        )
-    )
-    if line_exists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt item not found")
     try:
-        result = approve_receipt_item(
-            session,
-            receipt_item_id,
-            user.id,
-            payload.disposition,
-            payload.source_event_id,
-            payload.disposition_subtype,
-            payload.update_remembered_rule,
+        return receipt_commands.approve_receipt_line(
+            session, user, receipt_pk, receipt_item_id, payload.model_dump()
         )
     except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    session.commit()
-    return _approval_response(session, receipt_item_id, result)
-
-
-def _approval_response(
-    session: Session, receipt_item_id: int, result: ApprovalResult
-) -> dict[str, object]:
-    routing_record = session.scalar(
-        select(ReceiptRoutingRecord).where(
-            ReceiptRoutingRecord.receipt_item_id == receipt_item_id,
-            ReceiptRoutingRecord.destination_kind == result.approval.posting_kind,
-            ReceiptRoutingRecord.approved_version == result.approval.approval_version,
-        )
-    )
-    return {
-        "receipt_item_id": receipt_item_id,
-        "disposition": result.approval.disposition,
-        "disposition_subtype": result.approval.disposition_subtype,
-        "posting_kind": result.approval.posting_kind,
-        "posting_status": result.approval.posting_status,
-        "routing_record_id": routing_record.id if routing_record is not None else None,
-        "idempotent": result.idempotent,
-        "remembered_rule_differs": result.remembered_rule_differs,
-    }
+        raise domain_http_error(error, 409) from error
 
 
 @router.post("/receipts/{receipt_pk}/items/{receipt_item_id}/reroute")
@@ -1186,29 +440,12 @@ def reroute_receipt_line(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, object]:
     user, _ = current
-    line_exists = session.scalar(
-        select(ReceiptItem.id).where(
-            ReceiptItem.id == receipt_item_id,
-            ReceiptItem.receipt_pk == receipt_pk,
-        )
-    )
-    if line_exists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt item not found")
     try:
-        result = reclassify_expense_routing(
-            session,
-            receipt_item_id,
-            user.id,
-            payload.disposition,
-            payload.disposition_subtype,
-            payload.reason,
-            payload.source_event_id,
-            payload.update_remembered_rule,
+        return receipt_commands.reroute_receipt_line(
+            session, user, receipt_pk, receipt_item_id, payload.model_dump()
         )
     except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    session.commit()
-    return _approval_response(session, receipt_item_id, result)
+        raise domain_http_error(error, 409) from error
 
 
 @router.post("/receipts/{receipt_pk}/corrections")
@@ -1220,31 +457,11 @@ def correct_receipt(
 ) -> dict[str, object]:
     user, _ = current
     try:
-        result = review_receipt(
-            session,
-            receipt_pk,
-            user.id,
-            reason=payload.reason,
-            source_event_id=payload.source_event_id,
-            header_updates=payload.header_updates,
-            item_updates=payload.item_updates,
-            item_additions=[addition.model_dump() for addition in payload.item_additions],
-            item_exclusions=payload.item_exclusions,
-            remember_package_default_indexes=payload.remember_package_default_indexes,
-        )
+        return receipt_commands.correct_receipt(session, user, receipt_pk, payload.model_dump())
     except ValueError as error:
-        raise domain_http_error(error, status.HTTP_400_BAD_REQUEST) from error
+        raise domain_http_error(error, 400) from error
     except IndexError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    session.commit()
-    return {
-        "status": result.status.value,
-        "receipt_pk": result.receipt.receipt_pk,
-        "receipt_id": result.receipt.receipt_id,
-        "document_version": result.receipt.receipt_document_version,
-        "hold_id": result.hold.id if result.hold is not None else None,
-        "idempotent": result.idempotent,
-    }
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.get("/receipt-correction-holds")
@@ -1252,21 +469,7 @@ def list_receipt_correction_holds(
     _current: tuple[User, AuthSession] = Depends(admin_session),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> list[dict[str, object]]:
-    holds = session.scalars(
-        select(ReceiptCorrectionHold)
-        .where(ReceiptCorrectionHold.status == "PENDING")
-        .order_by(ReceiptCorrectionHold.id)
-    ).all()
-    return [
-        {
-            "id": hold.id,
-            "receipt_pk": hold.receipt_pk,
-            "proposed_receipt_id": hold.proposed_receipt_id,
-            "proposed_document": hold.proposed_document,
-            "created_at": hold.created_at.isoformat(),
-        }
-        for hold in holds
-    ]
+    return receipt_commands.list_receipt_correction_holds(session)
 
 
 @router.post("/receipt-correction-holds/{hold_id}/resolve")
@@ -1278,18 +481,11 @@ def resolve_receipt_correction_hold(
 ) -> dict[str, object]:
     user, _ = current
     try:
-        hold = resolve_correction_hold(
-            session,
-            hold_id,
-            user.id,
-            payload.action,
-            payload.reason,
-            payload.new_transaction_number,
+        return receipt_commands.resolve_receipt_correction_hold(
+            session, user, hold_id, payload.model_dump()
         )
     except ValueError as error:
-        raise domain_http_error(error, status.HTTP_400_BAD_REQUEST) from error
-    session.commit()
-    return {"id": hold.id, "status": hold.status, "action": hold.resolution_action}
+        raise domain_http_error(error, 400) from error
 
 
 @router.post("/receipts/upload")
@@ -1299,19 +495,20 @@ def upload_receipt(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, object]:
     try:
-        result = service.upload(session, upload.source, upload.media_type, upload.uploaded_by)
+        result = upload_and_complete(
+            session,
+            service,
+            upload.source,
+            upload.media_type,
+            upload.uploaded_by,
+            _request_outbox_dispatch,
+        )
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     if result.status is UploadStatus.SCAN_PENDING:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=result.status)
     if result.status is UploadStatus.MALWARE_REJECTED:
-        session.commit()  # keep the rejection audit row
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.status)
-    session.commit()
-    if result.upload_pk is not None and result.status is UploadStatus.QUEUED:
-        service.index_committed_upload(session, result.upload_pk)
-    if result.status in {UploadStatus.QUEUED, UploadStatus.EXACT_DUPLICATE}:
-        _request_outbox_dispatch()
     return {
         "upload_pk": result.upload_pk,
         "source_sha256": result.source_sha256,
@@ -1332,137 +529,18 @@ def resolve_near_match(
 ) -> dict[str, object]:
     user, _ = current
     try:
-        result = service.resolve_possible_duplicate(
-            session, upload_pk, user.id, payload.process_as_new
+        result = resolve_near_match_and_complete(
+            session,
+            service,
+            upload_pk,
+            user.id,
+            payload.process_as_new,
+            _request_outbox_dispatch,
         )
     except ValueError as error:
         raise domain_http_error(error, status.HTTP_400_BAD_REQUEST) from error
-    session.commit()
-    if result.status is UploadStatus.QUEUED:
-        if result.upload_pk is not None:
-            service.index_committed_upload(session, result.upload_pk)
-        _request_outbox_dispatch()
     return {
         "upload_pk": result.upload_pk,
         "status": result.status.value,
         "idempotent": result.idempotent,
     }
-
-
-def _request_outbox_dispatch() -> None:
-    try:
-        dispatch_pending_receipt_uploads.delay()
-    except Exception:
-        # The committed outbox row remains pending for the periodic publisher.
-        logger.warning("Receipt outbox dispatch request failed", exc_info=True)
-        return
-
-
-def _receipt_response(
-    receipt: Receipt,
-    items: Sequence[ReceiptItem],
-    store_items: dict[str, StoreItem],
-    sources: Sequence[ReceiptSource] = (),
-) -> dict[str, object]:
-    return {
-        "receipt_pk": receipt.receipt_pk,
-        "receipt_id": receipt.receipt_id,
-        "source_type": receipt.source_type,
-        "store_id": receipt.store_id,
-        "store": receipt.store,
-        "purchase_date": receipt.receipt_date.isoformat(),
-        "purchase_time": receipt.receipt_time.isoformat(),
-        "transaction_number": receipt.transaction_number,
-        "subtotal": str(receipt.subtotal) if receipt.subtotal is not None else None,
-        "tax": str(receipt.tax) if receipt.tax is not None else None,
-        "total": str(receipt.total),
-        "payment_method": receipt.payment_method,
-        "sources": [
-            {
-                "source_id": source.id,
-                "source_sha256": source.source_sha256,
-                "association_kind": source.association_kind,
-                "confirmed_repeated_line_indexes": (source.confirmed_repeated_line_indexes or []),
-            }
-            for source in sources
-        ],
-        "items": [
-            _item_response(
-                item,
-                store_items.get(item.store_item_id) if item.store_item_id is not None else None,
-                receipt.source_type,
-            )
-            for item in items
-        ],
-    }
-
-
-def _item_response(
-    item: ReceiptItem,
-    store_item: StoreItem | None = None,
-    receipt_source_type: str = "OCR",
-) -> dict[str, object]:
-    return {
-        "description": item.description,
-        "upc": item.upc,
-        "quantity": str(item.quantity) if item.quantity is not None else None,
-        "weight_lb": str(item.weight_lb) if item.weight_lb is not None else None,
-        "package_count": str(item.package_count) if item.package_count is not None else None,
-        "pack_size": str(item.pack_size) if item.pack_size is not None else None,
-        "pack_unit": item.pack_unit,
-        "unit_price": str(item.unit_price) if item.unit_price is not None else None,
-        "line_total": str(item.line_total),
-        "category": item.category,
-        "business_disposition": item.business_disposition,
-        "disposition_subtype": item.disposition_subtype,
-        "source_id": item.source_id,
-        "source_page": item.source_page,
-        "source_line_number": item.source_line_number,
-        "is_excluded": item.is_excluded,
-        "exclusion_reason": item.exclusion_reason,
-        "store_product_id": store_item.store_product_id if store_item is not None else None,
-        "identifier_source": (
-            "MANUAL"
-            if store_item is not None and store_item.identifier_source == "MANUAL"
-            else "USER_ENTERED"
-            if store_item is not None and receipt_source_type == "MANUAL"
-            else "OCR"
-            if store_item is not None
-            else None
-        ),
-        "common_name": store_item.common_name if store_item is not None else None,
-    }
-
-
-def _store_items_for_lines(session: Session, items: Sequence[ReceiptItem]) -> dict[str, StoreItem]:
-    store_item_ids = {item.store_item_id for item in items if item.store_item_id is not None}
-    if not store_item_ids:
-        return {}
-    return {
-        store_item.store_item_id: store_item
-        for store_item in session.scalars(
-            select(StoreItem).where(StoreItem.store_item_id.in_(store_item_ids))
-        )
-    }
-
-
-def _manual_item_responses(
-    items: Sequence[ReceiptItem], store_items: dict[str, StoreItem]
-) -> list[dict[str, str]]:
-    responses: list[dict[str, str]] = []
-    for item in items:
-        if item.store_item_id is None:
-            continue
-        store_item = store_items.get(item.store_item_id)
-        if store_item is None:
-            continue
-        responses.append(
-            {
-                "description": item.description,
-                "store_product_id": store_item.store_product_id,
-                "identifier_source": (
-                    "MANUAL" if store_item.identifier_source == "MANUAL" else "USER_ENTERED"
-                ),
-            }
-        )
-    return responses

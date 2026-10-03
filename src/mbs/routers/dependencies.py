@@ -5,12 +5,13 @@ from dataclasses import dataclass
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from mbs.auth import Role, require_role, resolve_session, verify_csrf
+from mbs.auth import Role, require_role, verify_csrf
 from mbs.db import get_session
 from mbs.errors import NotFoundError
 from mbs.media_assets import MediaAssetService
 from mbs.models import AuthSession, User
 from mbs.receipts.upload import ReceiptUploadService
+from mbs.services.auth import resolve_request_session
 
 SESSION_COOKIE = "mbs_session"
 CSRF_COOKIE = "mbs_csrf"
@@ -31,9 +32,7 @@ def current_session_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
         )
-    resolved = resolve_session(session, session_token)
-    if session.dirty:
-        session.commit()  # keep the idle-timeout touch or expiry revocation on read-only requests
+    resolved = resolve_request_session(session, session_token)
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
     return resolved

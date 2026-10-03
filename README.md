@@ -6,14 +6,18 @@ This repository contains planning documents, source artifacts, and a local FastA
 
 The governing documents, in precedence order, are the approved signed readiness decision, [the implementation overview](plan/00-overview.md), [the MVP roadmap](plan/01-mvp-roadmap.md), then the active capability document. Source workbooks and historical prompts provide evidence but do not override those decisions. See [the implementation-readiness gate](plan/02-implementation-readiness.md) before using real business data, enabling live providers, or promoting a release.
 
-The application runtime image uses `python:3.14-slim-trixie`, which currently resolves to official Python 3.14.7; Python 3.14.8 is released upstream but its official Docker tag is not published yet. Python 3.12 remains the project compatibility minimum. PostgreSQL and Redis use pinned PostgreSQL 18.6 and Redis 8.10.2 images. The production runtime image excludes tests and developer tools; tests run on the host or the dedicated test target. The older Devin prompt under `support/` is retained as historical context; its Java/Spring/React/Kubernetes stack is superseded by the approved plan.
+The application targets Python 3.14. Its runtime image uses `python:3.14-slim-trixie`, which currently resolves to official Python 3.14.7; Python 3.14.8 is released upstream but its official Docker tag is not published yet. Compatibility with earlier Python versions is not a requirement. PostgreSQL and Redis use pinned PostgreSQL 18.6 and Redis 8.10.2 images. The production runtime image excludes tests and developer tools; tests run on the host or the dedicated test target. The older Devin prompt under `support/` is retained as historical context; its Java/Spring/React/Kubernetes stack is superseded by the approved plan.
 
 ## Local Development
 
-Host development is verified on Python 3.12, which remains the minimum. The Docker app tracks the latest Python 3.14 patch in the official Trixie image. Host workflow (using [uv](https://docs.astral.sh/uv/)):
+Application code follows domain/service/repository layering. See [the architecture
+and refactor evidence](docs/architecture.md) for ownership rules, the module layout,
+compatibility imports, and validation results.
+
+Use Python 3.14 for host development. The Docker app tracks the latest Python 3.14 patch in the official Trixie image. Host workflow (using [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-uv sync --frozen --python 3.12
+uv sync --frozen --python 3.14
 uv run --frozen ruff check src tests
 uv run --frozen mypy src tests
 ```

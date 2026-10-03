@@ -10,34 +10,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
 from mbs.database_config import database_url as configured_database_url
-from mbs.models import (
-    MediaAsset,
-    Receipt,
-    ReceiptItem,
-    ReceiptSource,
-    ReceiptUpload,
-)
+from mbs.errors import BackupError as BackupError
 from mbs.receipts.storage import receipt_storage_root
+from mbs.repositories.backups import COUNTED_MODELS as COUNTED_MODELS
+from mbs.repositories.backups import BackupRepository
 
 MANIFEST_NAME = "manifest.json"
 FILES_DIR = "files"
 MANIFEST_VERSION = 1
-COUNTED_MODELS = {
-    "receipts": Receipt,
-    "receipt_items": ReceiptItem,
-    "receipt_sources": ReceiptSource,
-    "receipt_uploads": ReceiptUpload,
-    "media_assets": MediaAsset,
-}
-
-
-class BackupError(RuntimeError):
-    """Raised when a backup is incomplete, corrupt, or would overwrite existing data."""
+repository = BackupRepository()
 
 
 @dataclass(frozen=True)
@@ -128,15 +113,11 @@ def restore_backup(backup_dir: Path, database_url: str, storage_root: Path) -> l
     except BaseException:
         _discard_partial_restore(storage_root)
         raise
-    engine = create_engine(url)
-    try:
-        with Session(engine) as session:
-            expected = manifest["row_counts"]
-            if not isinstance(expected, dict):
-                raise BackupError("Backup manifest is invalid")
-            return verify_restored(session, storage_root, expected)
-    finally:
-        engine.dispose()
+    with repository.verification_session(url) as session:
+        expected = manifest["row_counts"]
+        if not isinstance(expected, dict):
+            raise BackupError("Backup manifest is invalid")
+        return verify_restored(session, storage_root, expected)
 
 
 def verify_restored(
@@ -152,14 +133,14 @@ def verify_restored(
     def present(key: str) -> bool:
         return (storage_root / key).is_file()
 
-    for upload in session.scalars(select(ReceiptUpload)):
+    for upload in repository.uploads(session):
         candidates = [key for key in (upload.file_key, upload.staging_file_key) if key]
         found = next((key for key in candidates if present(key)), None)
         if found is None:
             problems.append(f"upload {upload.upload_pk}: source file missing")
         elif _sha256(storage_root / found) != upload.source_sha256:
             problems.append(f"upload {upload.upload_pk}: source checksum mismatch")
-    for asset in session.scalars(select(MediaAsset)):
+    for asset in repository.assets(session):
         if asset.ingest_status == "READY":
             keys = [asset.original_file_key, asset.display_file_key, asset.thumbnail_file_key]
         else:
@@ -192,10 +173,7 @@ def _read_manifest(backup_dir: Path) -> dict[str, object]:
 
 
 def _row_counts(session: Session) -> dict[str, int]:
-    return {
-        name: int(session.scalar(select(func.count()).select_from(model)) or 0)
-        for name, model in COUNTED_MODELS.items()
-    }
+    return repository.row_counts(session)
 
 
 def _sha256(path: Path) -> str:
@@ -229,49 +207,12 @@ def _dump_database(url: URL, destination: Path) -> tuple[str, dict[str, int]]:
     """Dump the database and count rows from the same consistent view the dump used."""
     backend = url.get_backend_name()
     if backend == "postgresql":
-        target = destination / "database.pgdump"
-        engine = create_engine(url)
-        try:
-            # pg_dump joins the exported snapshot, so concurrent writes cannot skew the counts.
-            with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
-                snapshot = conn.scalar(text("SELECT pg_export_snapshot()"))
-                _run_postgres_tool(
-                    [
-                        "pg_dump",
-                        "--format=custom",
-                        "--no-owner",
-                        f"--snapshot={snapshot}",
-                        "--file",
-                        str(target),
-                    ],
-                    url,
-                )
-                with Session(bind=conn) as session:
-                    return target.name, _row_counts(session)
-        finally:
-            engine.dispose()
+        return repository.dump_postgres(url, destination, _run_postgres_tool)
     raise BackupError(f"Unsupported database engine: {backend}")
 
 
 def _ensure_empty_database(url: URL) -> None:
-    engine = create_engine(url, hide_parameters=True)
-    try:
-        inspector = inspect(engine)
-        schemas = [
-            schema
-            for schema in inspector.get_schema_names()
-            if schema != "information_schema" and not schema.startswith("pg_")
-        ]
-        if any(
-            inspector.get_table_names(schema=schema)
-            or inspector.get_view_names(schema=schema)
-            or inspector.get_sequence_names(schema=schema)
-            or inspector.get_materialized_view_names(schema=schema)
-            for schema in schemas
-        ):
-            raise BackupError("Restore target database already exists with user objects")
-    finally:
-        engine.dispose()
+    repository.ensure_empty_database(url)
 
 
 def _restore_database(url: URL, dump: Path) -> None:

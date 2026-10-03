@@ -5,9 +5,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from mbs.db import get_session
+from mbs.domain.settings import MAX_RETENTION_DAYS
 from mbs.models import AuthSession, User
 from mbs.routers.dependencies import admin_csrf_session, admin_session, domain_http_error
-from mbs.settings import MAX_RETENTION_DAYS, read_retention_settings, update_retention_settings
+from mbs.services.settings import change_retention_settings, read_retention_settings
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
@@ -41,8 +42,6 @@ def put_retention(
         if key.endswith("_retention_days")
     }
     try:
-        result = update_retention_settings(session, updates, user.id, payload.reason)
+        return change_retention_settings(session, updates, user.id, payload.reason)
     except ValueError as error:
         raise domain_http_error(error, status.HTTP_400_BAD_REQUEST) from error
-    session.commit()
-    return result

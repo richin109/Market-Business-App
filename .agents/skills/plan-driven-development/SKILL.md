@@ -40,6 +40,7 @@ For this repository specifically:
 - Run the narrowest relevant test first, followed by repository lint, type-check, and full test commands.
 - Do not claim a command passed unless it was actually run. Report unavailable tools, skipped checks, warnings, and unrelated failures.
 - Keep the plan synchronized with confirmed implementation decisions.
+- follows best practices for Python, FastAPI, SQLAlchemy, API, PostgreSQL, Redis, Celery, Docker Compose, and modular design
 
 Repository validation currently verified on the host uses Python 3.12 and uv:
 

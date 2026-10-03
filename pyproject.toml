@@ -63,7 +63,7 @@ module = ["celery", "celery.*", "pytesseract", "pytesseract.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["mbs.receipts.pdf_extraction"]
+module = ["mbs.infrastructure.pdf_text", "mbs.infrastructure.pdf_images"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]

@@ -2,20 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mbs.auth import (
     SESSION_ABSOLUTE_TIMEOUT,
     AccountLocked,
     LoginRateLimited,
-    authenticate,
-    consume_reset,
-    create_session,
-    issue_admin_reset,
-    revoke_session,
 )
 from mbs.db import get_session
+from mbs.errors import NotFoundError
 from mbs.models import AuthSession, User
 from mbs.routers.dependencies import (
     CSRF_COOKIE,
@@ -24,6 +19,17 @@ from mbs.routers.dependencies import (
     admin_session,
     csrf_session_user,
     current_session_user,
+)
+from mbs.services.auth import (
+    list_users as read_users,
+)
+from mbs.services.auth import (
+    login_and_create_session,
+    logout_session,
+    request_admin_reset,
+)
+from mbs.services.auth import (
+    reset_password as change_password,
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -52,7 +58,7 @@ def login(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, str]:
     try:
-        user = authenticate(
+        authenticated = login_and_create_session(
             session,
             payload.username,
             payload.password,
@@ -62,11 +68,9 @@ def login(
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS) from error
     except AccountLocked as error:
         raise HTTPException(status_code=status.HTTP_423_LOCKED) from error
-    if user is None:
-        session.commit()
+    if authenticated is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    session_token, csrf_token = create_session(session, user)
-    session.commit()
+    user, session_token, csrf_token = authenticated
     response.set_cookie(
         SESSION_COOKIE,
         session_token,
@@ -101,8 +105,7 @@ def logout(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, str]:
     _, auth_session = current
-    revoke_session(session, auth_session)
-    session.commit()
+    logout_session(session, auth_session)
     response.delete_cookie(SESSION_COOKIE)
     response.delete_cookie(CSRF_COOKIE)
     return {"status": "ok"}
@@ -115,12 +118,10 @@ def admin_reset(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, str]:
     admin, _ = current
-    target = session.scalar(select(User).where(User.username == payload.username.strip()))
-    if target is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    reset_token = issue_admin_reset(session, admin, target)
-    session.commit()
-    return {"reset_token": reset_token}
+    try:
+        return {"reset_token": request_admin_reset(session, admin, payload.username)}
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
 
 @router.post("/reset")
@@ -129,10 +130,9 @@ def reset_password(
     session: Session = Depends(get_session),  # noqa: B008
 ) -> dict[str, str]:
     try:
-        consume_reset(session, payload.token, payload.new_password)
+        change_password(session, payload.token, payload.new_password)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    session.commit()
     return {"status": "ok"}
 
 
@@ -141,7 +141,4 @@ def list_users(
     _current: tuple[User, AuthSession] = Depends(admin_session),  # noqa: B008
     session: Session = Depends(get_session),  # noqa: B008
 ) -> list[dict[str, str | int]]:
-    return [
-        {"id": listed.id, "username": listed.username, "role": listed.role}
-        for listed in session.scalars(select(User).order_by(User.id))
-    ]
+    return read_users(session)

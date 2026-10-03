@@ -3,18 +3,18 @@ from __future__ import annotations
 import argparse
 import getpass
 
-from sqlalchemy import select
-
-from mbs.auth import Role, create_user, recover_admin
+from mbs.auth import recover_admin
 from mbs.db import SessionLocal
-from mbs.models import User
+from mbs.errors import ConflictError
+from mbs.services.auth import bootstrap_admin_user
 
 
 def bootstrap_admin(username: str, password: str) -> None:
     with SessionLocal.begin() as session:
-        if session.scalar(select(User)) is not None:
-            raise SystemExit("An admin or user already exists")
-        create_user(session, username, password, Role.ADMIN)
+        try:
+            bootstrap_admin_user(session, username, password)
+        except ConflictError as error:
+            raise SystemExit(str(error)) from error
 
 
 def recover_admin_account(username: str, password: str) -> None:

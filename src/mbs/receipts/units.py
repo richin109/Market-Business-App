@@ -1,52 +1,6 @@
-from __future__ import annotations
-
-UNIT_ALIASES = {
-    "each": "EACH",
-    "pack": "PACK",
-    "dozen": "DOZEN",
-    "oz": "OZ",
-    "ounce": "OZ",
-    "ounces": "OZ",
-    "lb": "LB",
-    "lbs": "LB",
-    "pound": "LB",
-    "pounds": "LB",
-    "g": "G",
-    "gram": "G",
-    "grams": "G",
-    "kg": "KG",
-    "kilogram": "KG",
-    "kilograms": "KG",
-    "ml": "ML",
-    "milliliter": "ML",
-    "milliliters": "ML",
-    "l": "L",
-    "liter": "L",
-    "liters": "L",
-    "tsp": "TSP",
-    "teaspoon": "TSP",
-    "teaspoons": "TSP",
-    "tbsp": "TBSP",
-    "tablespoon": "TBSP",
-    "tablespoons": "TBSP",
-    "fl oz": "FL_OZ",
-    "fluid ounce": "FL_OZ",
-    "fluid ounces": "FL_OZ",
-    "fl_oz": "FL_OZ",
-    "cup": "CUP",
-    "cups": "CUP",
-    "pt": "PINT",
-    "pint": "PINT",
-    "pints": "PINT",
-    "qt": "QT",
-    "quart": "QT",
-    "quarts": "QT",
-    "gal": "GAL",
-    "gallon": "GAL",
-    "gallons": "GAL",
-}
-
-
-def normalize_unit_alias(value: str) -> str | None:
-    normalized = " ".join(value.casefold().split())
-    return UNIT_ALIASES.get(normalized)
+from mbs.domain.units import (
+    UNIT_ALIASES as UNIT_ALIASES,
+)
+from mbs.domain.units import (
+    normalize_unit_alias as normalize_unit_alias,
+)

@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
-import mbs.auth as auth_module
 import mbs.main as main_module
+import mbs.services.auth as auth_module
 from mbs.auth import (
     AccountLocked,
     LoginRateLimited,

@@ -5,11 +5,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
-from sqlalchemy import select
 
 from mbs.db import SessionLocal
 from mbs.media_assets import MediaAssetService
-from mbs.models import ReceiptUpload
 from mbs.receipts.duplicates import InMemoryPerceptualDuplicateStore, PillowPerceptualHasher
 from mbs.receipts.storage import (
     LocalProtectedFileStore,
@@ -23,26 +21,14 @@ from mbs.routers.receipts import router as receipts_router
 from mbs.routers.remembered_rules import router as remembered_rules_router
 from mbs.routers.settings import router as settings_router
 from mbs.routers.stores import router as stores_router
-from mbs.settings import read_setting
+from mbs.services.receipt_uploads import initialize_perceptual_store
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     perceptual_store = InMemoryPerceptualDuplicateStore()
     with SessionLocal() as session:
-        phash_threshold = read_setting(session, "phash_duplicate_threshold")
-        if phash_threshold is None:
-            raise RuntimeError("The phash_duplicate_threshold setting must not be NULL")
-        accepted_fingerprints = session.execute(
-            select(ReceiptUpload.source_sha256, ReceiptUpload.perceptual_hash).where(
-                ReceiptUpload.perceptual_hash.is_not(None),
-                ReceiptUpload.duplicate_status.is_distinct_from("POSSIBLE_DUPLICATE"),
-                ReceiptUpload.duplicate_status.is_distinct_from("CONFIRMED_DUPLICATE"),
-            )
-        )
-        for source_sha256, fingerprint in accepted_fingerprints:
-            if fingerprint is not None:
-                perceptual_store.save(source_sha256, fingerprint)
+        phash_threshold = initialize_perceptual_store(session, perceptual_store)
     file_store = LocalProtectedFileStore(receipt_storage_root())
     application.state.media_asset_service = MediaAssetService(file_store)
     application.state.receipt_upload_service = ReceiptUploadService(
@@ -51,7 +37,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         malware_scanner=UnavailablePDFScanner(),
         perceptual_hasher=PillowPerceptualHasher(),
         perceptual_store=perceptual_store,
-        perceptual_threshold=int(phash_threshold),
+        perceptual_threshold=phash_threshold,
     )
     yield
 

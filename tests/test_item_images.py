@@ -297,6 +297,8 @@ def test_im_002_owner_galleries_upload_replace_reorder_detach_and_fallback(
         item_gallery = client.get(item_path, headers=viewer_headers).json()
         ordered_ids = [image["link_id"] for image in item_gallery["images"]]
         assert len(ordered_ids) == 3
+        assert ordered_ids == [first.json()["link_id"], second_link, third.json()["link_id"]]
+        assert [image["sort_order"] for image in item_gallery["images"]] == [0, 1, 2]
         reordered = client.put(
             f"{item_path}/order",
             headers=manager_headers,
