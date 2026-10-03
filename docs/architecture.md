@@ -13,8 +13,8 @@ Historical support tools, migrations, templates, product requirements, and priva
 receipt inputs were not redesigned. Test database setup intentionally remains
 database-aware. PostgreSQL is still the sole certified database backend.
 
-Python 3.14 is the development and runtime target. Compatibility with earlier
-Python versions is not required; refactoring validation targets Python 3.14.
+The Docker application runtime targets Python 3.14. The project minimum remains
+Python 3.12, and compatibility below 3.12 is not required.
 
 ## Corrected Code
 
@@ -77,13 +77,13 @@ identity, mapping history, metadata, suggestions, commands, reads, and galleries
 
 ## Summary
 
-Verification on the rebuilt, unmounted candidate:
+Verification on the rebuilt, unmounted candidate `sha256:5dc268886a937df775ea956b3256b3c157f`:
 
 | Command | Result |
 | --- | --- |
-| `docker compose run --rm test` | 233 passed, 1 opt-in private-corpus skip |
+| `docker compose run --rm test` | 237 passed, 2 skipped |
 | `docker compose run --rm test ruff check src tests` | Passed |
-| `docker compose run --rm test mypy src tests` | Passed, 178 files |
+| `docker compose run --rm test mypy src tests` | Passed, 179 files |
 | `docker compose run --rm --build test-migrations-postgres` | 1 passed, no skips |
 | Editor diagnostics | No errors |
 

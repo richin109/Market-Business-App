@@ -178,5 +178,48 @@ def receipt_items_response(session: Session, receipt_pk: str) -> list[dict[str, 
     return responses
 
 
+def receipt_upload_status_response(session: Session, upload_pk: str) -> dict[str, object]:
+    upload = repository.get_upload(session, upload_pk)
+    if upload is None:
+        raise NotFoundError("Receipt upload not found")
+
+    extraction = upload.ocr_extraction_result or {}
+    raw_results = extraction.get("order_results", [])
+    order_results = (
+        [
+            {
+                "order_index": result["order_index"],
+                "status": result["status"],
+                "receipt_pk": result.get("receipt_pk"),
+                "issue_codes": result.get("issue_codes", []),
+            }
+            for result in raw_results
+            if isinstance(result, dict)
+            and isinstance(result.get("order_index"), int)
+            and isinstance(result.get("status"), str)
+        ]
+        if isinstance(raw_results, list)
+        else []
+    )
+    raw_summary = extraction.get("order_summary", {})
+    order_summary = (
+        {
+            key: value
+            for key, value in raw_summary.items()
+            if key in {"added", "source_review", "held", "already_associated"}
+            and isinstance(value, int)
+        }
+        if isinstance(raw_summary, dict)
+        else {}
+    )
+    return {
+        "upload_pk": upload.upload_pk,
+        "status": upload.processing_status,
+        "ocr_attempts": upload.ocr_attempts,
+        "order_summary": order_summary,
+        "orders": order_results,
+    }
+
+
 def manual_receipt_stores(session: Session) -> list[Store]:
     return repository.manual_stores(session)

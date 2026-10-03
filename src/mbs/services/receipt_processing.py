@@ -119,7 +119,10 @@ class PersistedUploadProcessor:
                     return upload.processing_status
                 if upload.processing_lease_token != lease_token:
                     return upload.processing_status
-                if document.get("review_required") is True:
+                order_documents = document.get("orders")
+                if document.get("review_required") is True and not isinstance(
+                    order_documents, list
+                ):
                     upload.processing_status = "REVIEW"
                     upload.processing_lease_token = None
                     upload.processing_lease_until = None
@@ -145,20 +148,75 @@ class PersistedUploadProcessor:
                         ),
                     )
                     return "REVIEW"
-                order_documents = document.get("orders")
                 if isinstance(order_documents, list):
                     if not order_documents:
                         raise ValueError("Segmented receipt document contains no orders")
-                    upload.ocr_extraction_result = document
                     source_review_required = False
                     category_rules = load_category_rules(session)
-                    for order_document in order_documents:
-                        if (
-                            not isinstance(order_document, dict)
-                            or order_document.get("review_required") is True
-                        ):
-                            raise ValueError("Segmented receipt document is invalid")
-                        extracted = normalize_receipt(order_document, category_rules)
+                    order_results: list[dict[str, object]] = []
+                    uploaded_by = upload.uploaded_by
+
+                    def record_order_result(
+                        order_index: int,
+                        result_status: str,
+                        receipt_pk: str | None = None,
+                        issue_codes: list[str] | None = None,
+                    ) -> None:
+                        result: dict[str, object] = {
+                            "order_index": order_index,
+                            "status": result_status,
+                            "issue_codes": issue_codes or [],
+                        }
+                        if receipt_pk is not None:
+                            result["receipt_pk"] = receipt_pk
+                        order_results.append(result)
+                        repository.add(
+                            session,
+                            AuditLog(
+                                event_type="RECEIPT_ORDER_IMPORT_OUTCOME",
+                                actor=(
+                                    str(uploaded_by)
+                                    if uploaded_by is not None
+                                    else None
+                                ),
+                                entity_type="ReceiptUpload",
+                                entity_id=upload_pk,
+                                details=(
+                                    f"order_index={order_index}; status={result_status}; "
+                                    f"receipt_pk={receipt_pk}; issues={issue_codes or []}"
+                                )[:1000],
+                            ),
+                        )
+
+                    for order_index, order_document in enumerate(order_documents, start=1):
+                        if not isinstance(order_document, dict):
+                            record_order_result(order_index, "HELD", issue_codes=["INVALID_ORDER"])
+                            continue
+                        order_extraction = order_document.get("extraction", {})
+                        raw_issues = (
+                            order_extraction.get("issues", [])
+                            if isinstance(order_extraction, dict)
+                            else []
+                        )
+                        issue_codes = (
+                            [issue[:100] for issue in raw_issues[:20] if isinstance(issue, str)]
+                            if isinstance(raw_issues, list)
+                            else []
+                        )
+                        if order_document.get("review_required") is True:
+                            record_order_result(
+                                order_index,
+                                "HELD",
+                                issue_codes=issue_codes or ["REVIEW_REQUIRED"],
+                            )
+                            continue
+                        try:
+                            extracted = normalize_receipt(order_document, category_rules)
+                        except (KeyError, TypeError, ValueError):
+                            record_order_result(
+                                order_index, "HELD", issue_codes=["INVALID_ORDER_FIELDS"]
+                            )
+                            continue
                         existing_receipt = repository.receipt_identity(
                             session, extracted.receipt_id, lock=True
                         )
@@ -174,10 +232,19 @@ class PersistedUploadProcessor:
                                     existing_receipt,
                                 )
                                 source_review_required = True
+                                record_order_result(
+                                    order_index, "SOURCE_REVIEW", existing_receipt.receipt_pk
+                                )
+                            else:
+                                record_order_result(
+                                    order_index,
+                                    "ALREADY_ASSOCIATED",
+                                    existing_receipt.receipt_pk,
+                                )
                             continue
                         try:
                             with repository.savepoint(session):
-                                persist_extracted_receipt(
+                                receipt = persist_extracted_receipt(
                                     session,
                                     extracted,
                                     upload,
@@ -193,12 +260,31 @@ class PersistedUploadProcessor:
                                 raise
                             persist_source_candidate(session, extracted, upload, duplicate)
                             source_review_required = True
+                            record_order_result(
+                                order_index, "SOURCE_REVIEW", duplicate.receipt_pk
+                            )
+                        else:
+                            record_order_result(order_index, "ADDED", receipt.receipt_pk)
 
+                    order_summary = {
+                        "added": sum(result["status"] == "ADDED" for result in order_results),
+                        "source_review": sum(
+                            result["status"] == "SOURCE_REVIEW" for result in order_results
+                        ),
+                        "held": sum(result["status"] == "HELD" for result in order_results),
+                        "already_associated": sum(
+                            result["status"] == "ALREADY_ASSOCIATED" for result in order_results
+                        ),
+                    }
+                    document["order_results"] = order_results
+                    document["order_summary"] = order_summary
+                    upload.ocr_extraction_result = document
                     upload.processing_lease_token = None
                     upload.processing_lease_until = None
-                    if source_review_required:
+                    if source_review_required or order_summary["held"]:
                         upload.processing_status = "REVIEW"
-                        upload.duplicate_status = "SOURCE_ASSOCIATION_REVIEW"
+                        if source_review_required:
+                            upload.duplicate_status = "SOURCE_ASSOCIATION_REVIEW"
                         return "REVIEW"
                     upload.processing_status = "SUCCEEDED"
                     return "SUCCEEDED"

@@ -250,6 +250,43 @@ def test_local_receipt_adapter_uses_ocr_for_image_only_and_weak_native_text() ->
     assert weak_document["extraction"]["field_sources"]["transaction_number"] == "OCR"
 
 
+def test_pdf_documents_are_closed_after_success_and_extraction_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _image_pdf(_synthetic_receipt_text())
+    open_document = pymupdf.open
+    opened_documents: list[Any] = []
+    closed_documents: list[Any] = []
+
+    class TrackedDocument:
+        def __init__(self, document: Any) -> None:
+            self._document = document
+            opened_documents.append(self)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._document, name)
+
+        def close(self) -> None:
+            closed_documents.append(self)
+            self._document.close()
+
+    def tracked_open(*args: Any, **kwargs: Any) -> TrackedDocument:
+        return TrackedDocument(open_document(*args, **kwargs))
+
+    monkeypatch.setattr(pymupdf, "open", tracked_open)
+
+    classify_pdf(source)
+    extract_pdf_text(source, lambda _page, _number: (_synthetic_receipt_text(), Decimal("0.96")))
+    assert len(opened_documents) == len(closed_documents)
+
+    with pytest.raises(RuntimeError, match="synthetic OCR failure"):
+        extract_pdf_text(
+            source,
+            lambda _page, _number: (_ for _ in ()).throw(RuntimeError("synthetic OCR failure")),
+        )
+    assert len(opened_documents) == len(closed_documents)
+
+
 def test_native_ocr_conflict_prefers_more_confident_field_and_records_reconciliation() -> None:
     source = _image_pdf(_synthetic_receipt_text())
     pdf = pymupdf.open(stream=source, filetype="pdf")

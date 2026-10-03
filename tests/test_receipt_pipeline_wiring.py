@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -393,6 +394,62 @@ def test_directory_batch_upload_replay_is_per_file_idempotent_and_reports_partia
     engine.dispose()
 
 
+def test_concurrent_batch_retries_create_one_upload_and_outbox_event(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    engine, session_factory = _database(tmp_path / "concurrent-batch-retry.db")
+    monkeypatch.setenv("RECEIPT_STORAGE_PATH", str(tmp_path / "concurrent-batch-files"))
+    with session_factory.begin() as session:
+        manager = create_user(
+            session, "concurrent-batch-manager", "synthetic password", Role.MANAGER
+        )
+        token, csrf = create_session(session, manager)
+
+    def override_session() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
+
+    dispatches: list[None] = []
+    app.dependency_overrides[get_session] = override_session
+    monkeypatch.setattr(main_module, "SessionLocal", session_factory)
+    monkeypatch.setattr("mbs.receipts.tasks.SessionLocal", session_factory)
+    monkeypatch.setattr(receipt_routes, "_request_outbox_dispatch", lambda: dispatches.append(None))
+    source = _near_match_png()
+    try:
+        with TestClient(app) as client:
+
+            def submit_batch() -> Any:
+                return client.post(
+                    "/api/v1/receipts/upload-batch",
+                    files=[("files", ("retry.png", source, "image/png"))],
+                    headers={
+                        "Cookie": f"mbs_session={token}",
+                        "X-CSRF-Token": csrf,
+                    },
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(submit_batch), pool.submit(submit_batch)]
+                responses = [future.result() for future in futures]
+
+        assert all(response.status_code == 200 for response in responses)
+        file_results = [response.json()["files"][0] for response in responses]
+        assert sorted(result["status"] for result in file_results) == [
+            "EXACT_DUPLICATE",
+            "QUEUED",
+        ]
+        assert len({result["upload_pk"] for result in file_results}) == 1
+        assert sum(not result["idempotent"] for result in file_results) == 1
+        assert len(dispatches) == 1
+        with session_factory() as session:
+            assert session.scalar(select(func.count(ReceiptUpload.upload_pk))) == 1
+            assert session.scalar(select(func.count(ReceiptOutboxEvent.id))) == 1
+            assert session.scalar(select(func.count(Receipt.receipt_pk))) == 0
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
 def test_worker_processes_changed_single_image_versions_without_duplicate_receipts(
     tmp_path: Path,
 ) -> None:
@@ -537,6 +594,321 @@ def test_worker_processes_changed_single_image_versions_without_duplicate_receip
                     ).where(Receipt.transaction_number.like("SYN-ORDER-%"))
                 ) == (order_count + sum(range(5, order_count, 5)))
     finally:
+        engine.dispose()
+
+
+def test_batch_endpoint_processes_changed_multi_order_image_versions_idempotently(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    engine, session_factory = _database(tmp_path / "batch-changed-image-versions.db")
+    storage_path = tmp_path / "batch-changed-image-files"
+    monkeypatch.setenv("RECEIPT_STORAGE_PATH", str(storage_path))
+    with session_factory.begin() as session:
+        manager = create_user(session, "batch-version-manager", "synthetic password", Role.MANAGER)
+        manager_id = manager.id
+        manager_token, manager_csrf = create_session(session, manager)
+
+    order_text_by_hash: dict[str, str] = {}
+    ocr_calls: list[str] = []
+
+    def fake_image_ocr(source: bytes, _page_number: int) -> tuple[str, Decimal]:
+        source_hash = hashlib.sha256(source).hexdigest()
+        ocr_calls.append(source_hash)
+        return order_text_by_hash[source_hash], Decimal("0.96")
+
+    processor = PersistedUploadProcessor(
+        session_factory,
+        LocalProtectedFileStore(storage_path),
+        LocalReceiptOCREngine(fake_image_ocr),
+    )
+    queued_uploads: list[str] = []
+
+    def override_session() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
+
+    def dispatch_after_commit() -> None:
+        assert dispatch_pending_receipt_uploads.run() == 1
+        while queued_uploads:
+            processor.process(queued_uploads.pop(0))
+
+    app.dependency_overrides[get_session] = override_session
+    monkeypatch.setattr(main_module, "SessionLocal", session_factory)
+    monkeypatch.setattr("mbs.receipts.tasks.SessionLocal", session_factory)
+    monkeypatch.setattr(
+        "mbs.receipts.tasks.process_receipt_upload.delay",
+        queued_uploads.append,
+    )
+    monkeypatch.setattr(receipt_routes, "_request_outbox_dispatch", dispatch_after_commit)
+
+    upload_ids: dict[int, str] = {}
+    receipt_ids: dict[str, str] = {}
+    line_ids: dict[str, int] = {}
+    approved_identity: tuple[int, int] | None = None
+    try:
+        with TestClient(app) as client:
+            for order_count in (5, 10, 15):
+                source = _multi_order_image(order_count)
+                source_hash = hashlib.sha256(source).hexdigest()
+                order_text_by_hash[source_hash] = _multi_order_text(order_count)
+                response = client.post(
+                    "/api/v1/receipts/upload-batch",
+                    files=[("files", ("orders.png", source, "image/png"))],
+                    headers={
+                        "Cookie": f"mbs_session={manager_token}",
+                        "X-CSRF-Token": manager_csrf,
+                    },
+                )
+                assert response.status_code == 200
+                uploaded = response.json()["files"][0]
+                assert uploaded["status"] == (
+                    "QUEUED" if order_count == 5 else "POSSIBLE_DUPLICATE"
+                )
+                upload_ids[order_count] = uploaded["upload_pk"]
+                if order_count > 5:
+                    unresolved = client.post(
+                        f"/api/v1/receipt-uploads/{uploaded['upload_pk']}/resolve-near-match",
+                        json={"process_as_new": True},
+                        headers={"Cookie": f"mbs_session={manager_token}"},
+                    )
+                    assert unresolved.status_code == 403
+                    resolved = client.post(
+                        f"/api/v1/receipt-uploads/{uploaded['upload_pk']}/resolve-near-match",
+                        json={"process_as_new": True},
+                        headers={
+                            "Cookie": f"mbs_session={manager_token}",
+                            "X-CSRF-Token": manager_csrf,
+                        },
+                    )
+                    assert resolved.status_code == 200
+                    assert resolved.json()["status"] == "QUEUED"
+
+                with session_factory.begin() as session:
+                    upload = session.get(ReceiptUpload, uploaded["upload_pk"])
+                    expected_status = "SUCCEEDED" if order_count == 5 else "REVIEW"
+                    assert upload is not None and upload.processing_status == expected_status
+
+                    receipts = session.scalars(
+                        select(Receipt).where(
+                            Receipt.transaction_number.like("SYN-ORDER-%")
+                        )
+                    ).all()
+                    actual_receipt_ids = {
+                        receipt.transaction_number: receipt.receipt_pk for receipt in receipts
+                    }
+                    assert len(actual_receipt_ids) == order_count
+                    assert set(actual_receipt_ids) == {
+                        f"SYN-ORDER-{number:03d}" for number in range(1, order_count + 1)
+                    }
+                    for transaction_number, receipt_pk in receipt_ids.items():
+                        assert actual_receipt_ids[transaction_number] == receipt_pk
+                        assert session.scalar(
+                            select(ReceiptItem.id).where(ReceiptItem.receipt_pk == receipt_pk)
+                        ) == line_ids[transaction_number]
+
+                    if order_count == 5:
+                        first_line = session.scalar(
+                            select(ReceiptItem).where(
+                                ReceiptItem.receipt_pk
+                                == actual_receipt_ids["SYN-ORDER-001"]
+                            )
+                        )
+                        assert first_line is not None
+                        assert first_line.store_item_id is not None
+                        assert first_line.item_id is not None
+                        confirm_store_item_mapping(
+                            session,
+                            first_line.store_item_id,
+                            first_line.item_id,
+                            manager_id,
+                            effective_from=date(2026, 10, 3),
+                        )
+                        first_line.business_disposition = "ORDINARY_BUSINESS_PURCHASE"
+                        first_line.disposition_subtype = "DIRECT_EXPENSE"
+                        session.flush()
+                        approval = approve_receipt_item(
+                            session,
+                            first_line.id,
+                            manager_id,
+                            BusinessDisposition.ORDINARY_BUSINESS_PURCHASE,
+                            "batch-version-approval",
+                            DispositionSubtype.DIRECT_EXPENSE,
+                        ).approval
+                        route_id = session.scalar(
+                            select(ReceiptRoutingRecord.id).where(
+                                ReceiptRoutingRecord.receipt_item_id == first_line.id
+                            )
+                        )
+                        assert route_id is not None
+                        approved_identity = approval.id, route_id
+
+                    for transaction_number, receipt_pk in actual_receipt_ids.items():
+                        receipt_ids[transaction_number] = receipt_pk
+                        line_id = session.scalar(
+                            select(ReceiptItem.id).where(ReceiptItem.receipt_pk == receipt_pk)
+                        )
+                        assert line_id is not None
+                        line_ids[transaction_number] = line_id
+
+                    assert session.scalar(select(func.count(ReceiptLineApproval.id))) == (
+                        1 if approved_identity is not None else 0
+                    )
+                    assert session.scalar(select(func.count(ReceiptRoutingRecord.id))) == (
+                        1 if approved_identity is not None else 0
+                    )
+                    if approved_identity is not None:
+                        assert approved_identity == (
+                            session.scalar(select(ReceiptLineApproval.id)),
+                            session.scalar(select(ReceiptRoutingRecord.id)),
+                        )
+
+            assert len(ocr_calls) == 3
+            replay_names = {
+                15: "reselected/final-orders.png",
+                5: "archive/original-orders.png",
+                10: "another-folder/middle-orders.png",
+            }
+            for order_count in (15, 5, 10):
+                source = _multi_order_image(order_count)
+                replay = client.post(
+                    "/api/v1/receipts/upload-batch",
+                    files=[("files", (replay_names[order_count], source, "image/png"))],
+                    headers={
+                        "Cookie": f"mbs_session={manager_token}",
+                        "X-CSRF-Token": manager_csrf,
+                    },
+                )
+                assert replay.status_code == 200
+                result = replay.json()["files"][0]
+                assert result["status"] == "EXACT_DUPLICATE"
+                assert result["idempotent"] is True
+                assert result["upload_pk"] == upload_ids[order_count]
+            assert len(ocr_calls) == 3
+
+        with session_factory() as session:
+            assert session.scalar(
+                select(func.count(Receipt.receipt_pk)).where(
+                    Receipt.transaction_number.like("SYN-ORDER-%")
+                )
+            ) == 15
+            assert session.scalar(
+                select(func.count(ReceiptSource.id)).join(
+                    Receipt, Receipt.receipt_pk == ReceiptSource.receipt_pk
+                ).where(Receipt.transaction_number.like("SYN-ORDER-%"))
+            ) == 30
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def test_batch_status_reports_partial_order_holds_without_losing_valid_orders(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    engine, session_factory = _database(tmp_path / "batch-partial-order-status.db")
+    storage_path = tmp_path / "batch-partial-order-files"
+    monkeypatch.setenv("RECEIPT_STORAGE_PATH", str(storage_path))
+    with session_factory.begin() as session:
+        manager = create_user(session, "partial-order-manager", "synthetic password", Role.MANAGER)
+        manager_token, manager_csrf = create_session(session, manager)
+        viewer = create_user(session, "partial-order-viewer", "synthetic password", Role.VIEWER)
+        viewer_token, _ = create_session(session, viewer)
+
+    source = _multi_order_image(3)
+    source_hash = hashlib.sha256(source).hexdigest()
+    order_text = _multi_order_text(3).replace("Order # SYN-ORDER-002\n", "")
+
+    def fake_image_ocr(_source: bytes, _page_number: int) -> tuple[str, Decimal]:
+        return order_text, Decimal("0.96")
+
+    processor = PersistedUploadProcessor(
+        session_factory,
+        LocalProtectedFileStore(storage_path),
+        LocalReceiptOCREngine(fake_image_ocr),
+    )
+    queued_uploads: list[str] = []
+
+    def override_session() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
+
+    def dispatch_after_commit() -> None:
+        assert dispatch_pending_receipt_uploads.run() == 1
+        while queued_uploads:
+            processor.process(queued_uploads.pop(0))
+
+    app.dependency_overrides[get_session] = override_session
+    monkeypatch.setattr(main_module, "SessionLocal", session_factory)
+    monkeypatch.setattr("mbs.receipts.tasks.SessionLocal", session_factory)
+    monkeypatch.setattr("mbs.receipts.tasks.process_receipt_upload.delay", queued_uploads.append)
+    monkeypatch.setattr(receipt_routes, "_request_outbox_dispatch", dispatch_after_commit)
+    try:
+        with TestClient(app) as client:
+            headers = {
+                "Cookie": f"mbs_session={manager_token}",
+                "X-CSRF-Token": manager_csrf,
+            }
+            uploaded = client.post(
+                "/api/v1/receipts/upload-batch",
+                files=[("files", ("orders.png", source, "image/png"))],
+                headers=headers,
+            )
+            assert uploaded.status_code == 200
+            assert uploaded.json()["files"][0]["source_sha256"] == source_hash
+            upload_pk = uploaded.json()["files"][0]["upload_pk"]
+
+            status_response = client.get(
+                f"/api/v1/receipt-uploads/{upload_pk}/status",
+                headers={"Cookie": f"mbs_session={manager_token}"},
+            )
+            viewer_response = client.get(
+                f"/api/v1/receipt-uploads/{upload_pk}/status",
+                headers={"Cookie": f"mbs_session={viewer_token}"},
+            )
+            missing_response = client.get(
+                f"/api/v1/receipt-uploads/{uuid4()}/status",
+                headers={"Cookie": f"mbs_session={manager_token}"},
+            )
+
+        assert status_response.status_code == 200
+        assert viewer_response.status_code == 403
+        assert missing_response.status_code == 404
+        status_payload = status_response.json()
+        assert status_payload["status"] == "REVIEW"
+        assert status_payload["order_summary"] == {
+            "added": 2,
+            "source_review": 0,
+            "held": 1,
+            "already_associated": 0,
+        }
+        assert [order["status"] for order in status_payload["orders"]] == [
+            "ADDED",
+            "HELD",
+            "ADDED",
+        ]
+        assert status_payload["orders"][1]["issue_codes"]
+
+        with session_factory() as session:
+            receipts = session.scalars(
+                select(Receipt).where(Receipt.transaction_number.like("SYN-ORDER-%"))
+            ).all()
+            assert {receipt.transaction_number for receipt in receipts} == {
+                "SYN-ORDER-001",
+                "SYN-ORDER-003",
+            }
+            assert session.scalar(
+                select(func.count(ReceiptSource.id)).where(ReceiptSource.upload_pk == upload_pk)
+            ) == 2
+            assert session.scalar(select(func.count(ReceiptLineApproval.id))) == 0
+            assert session.scalar(select(func.count(ReceiptRoutingRecord.id))) == 0
+            outcomes = session.scalars(
+                select(AuditLog).where(
+                    AuditLog.event_type == "RECEIPT_ORDER_IMPORT_OUTCOME",
+                    AuditLog.entity_id == upload_pk,
+                )
+            ).all()
+            assert len(outcomes) == 3
+    finally:
+        app.dependency_overrides.clear()
         engine.dispose()
 
 

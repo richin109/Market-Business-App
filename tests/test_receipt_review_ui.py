@@ -346,6 +346,7 @@ def test_directory_batch_page_previews_folder_and_shows_idempotent_replay(
         assert response.status_code == 200
         assert viewer_response.status_code == 403
         requests: list[dict[str, Any]] = []
+        status_requests: list[str] = []
 
         def route_batch(route: Any) -> None:
             requests.append(
@@ -355,12 +356,46 @@ def test_directory_batch_page_previews_folder_and_shows_idempotent_replay(
                 }
             )
             replay = len(requests) == 2
+            possible_match = len(requests) == 3
             files = [
-                {"filename": "synthetic.pdf", "status": "EXACT_DUPLICATE", "idempotent": True},
-                {"filename": "synthetic.png", "status": "EXACT_DUPLICATE", "idempotent": True},
+                {
+                    "filename": "synthetic.pdf",
+                    "status": "POSSIBLE_DUPLICATE",
+                    "upload_pk": "upload-1",
+                    "idempotent": False,
+                },
+                {
+                    "filename": "synthetic.png",
+                    "status": "EXACT_DUPLICATE",
+                    "upload_pk": "upload-2",
+                    "idempotent": True,
+                },
+            ] if possible_match else [
+                {
+                    "filename": "synthetic.pdf",
+                    "status": "EXACT_DUPLICATE",
+                    "upload_pk": "upload-1",
+                    "idempotent": True,
+                },
+                {
+                    "filename": "synthetic.png",
+                    "status": "EXACT_DUPLICATE",
+                    "upload_pk": "upload-2",
+                    "idempotent": True,
+                },
             ] if replay else [
-                {"filename": "synthetic.pdf", "status": "QUEUED", "idempotent": False},
-                {"filename": "synthetic.png", "status": "QUEUED", "idempotent": False},
+                {
+                    "filename": "synthetic.pdf",
+                    "status": "QUEUED",
+                    "upload_pk": "upload-1",
+                    "idempotent": False,
+                },
+                {
+                    "filename": "synthetic.png",
+                    "status": "QUEUED",
+                    "upload_pk": "upload-2",
+                    "idempotent": False,
+                },
             ]
             route.fulfill(
                 status=200,
@@ -368,10 +403,57 @@ def test_directory_batch_page_previews_folder_and_shows_idempotent_replay(
                 body=json.dumps({"file_count": 2, "total_bytes": 200, "files": files}),
             )
 
+        def route_status(route: Any) -> None:
+            status_requests.append(route.request.url)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "upload_pk": route.request.url.rsplit("/", 2)[-2],
+                        "status": "REVIEW",
+                        "ocr_attempts": 1,
+                        "order_summary": {
+                            "added": 1,
+                            "source_review": 0,
+                            "held": 1,
+                            "already_associated": 0,
+                        },
+                        "orders": [
+                            {"order_index": 1, "status": "ADDED", "issue_codes": []},
+                            {
+                                "order_index": 2,
+                                "status": "HELD",
+                                "issue_codes": ["MISSING_TRANSACTION_NUMBER"],
+                            },
+                        ],
+                    }
+                ),
+            )
+
+        resolutions: list[dict[str, Any]] = []
+
+        def route_near_match_resolution(route: Any) -> None:
+            resolutions.append(
+                {
+                    "headers": route.request.headers,
+                    "body": route.request.post_data_json,
+                }
+            )
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {"upload_pk": "upload-1", "status": "QUEUED", "idempotent": False}
+                ),
+            )
+
         page.context.add_cookies(
             [{"name": "mbs_csrf", "value": "directory-batch-csrf", "url": "http://testserver"}]
         )
         page.route("**/api/v1/receipts/upload-batch", route_batch)
+        page.route("**/api/v1/receipt-uploads/*/status", route_status)
+        page.route("**/api/v1/receipt-uploads/*/resolve-near-match", route_near_match_resolution)
         page.route("http://testserver/", lambda route: route.fulfill(body=response.text))
         page.goto("http://testserver/")
         page.set_content(response.text)
@@ -385,9 +467,12 @@ def test_directory_batch_page_previews_folder_and_shows_idempotent_replay(
         upload_button = page.locator("[data-upload-button]")
         upload_button.click()
         page.wait_for_function(
-            "document.querySelector('[data-result-list]').innerText.includes('QUEUED')"
+            "document.querySelector('[data-result-list]').innerText.includes('Order 2: HELD')"
         )
-        assert page.locator("[data-result-list]").inner_text().count("QUEUED") == 2
+        assert page.locator("[data-result-list]").inner_text().count("REVIEW") == 2
+        assert page.locator("[data-result-list]").inner_text().count("Order 1: ADDED") == 2
+        assert page.locator("[data-result-list]").inner_text().count("Order 2: HELD") == 2
+        assert len(status_requests) == 2
         assert requests[0]["headers"]["x-csrf-token"] == "directory-batch-csrf"
         assert "nested/synthetic.pdf" in requests[0]["body"]
 
@@ -396,7 +481,19 @@ def test_directory_batch_page_previews_folder_and_shows_idempotent_replay(
             "document.querySelector('[data-result-list]').innerText.includes('EXACT_DUPLICATE')"
         )
         assert page.locator("[data-result-list]").inner_text().count("Already received") == 2
+        assert len(status_requests) == 4
         assert requests[1]["headers"]["x-csrf-token"] == "directory-batch-csrf"
+
+        upload_button.click()
+        page.get_by_role("button", name="Process as new").wait_for()
+        assert "POSSIBLE_DUPLICATE" in page.locator("[data-result-list]").inner_text()
+        page.get_by_role("button", name="Process as new").click()
+        page.wait_for_function(
+            "document.querySelector('[data-result-list]').innerText.includes('Order 2: HELD')"
+        )
+        assert resolutions[0]["headers"]["x-csrf-token"] == "directory-batch-csrf"
+        assert resolutions[0]["body"] == {"process_as_new": True}
+        assert len(status_requests) == 6
         for width in (1280, 390):
             page.set_viewport_size({"width": width, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

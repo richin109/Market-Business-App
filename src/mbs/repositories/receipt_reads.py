@@ -59,6 +59,9 @@ class ReceiptReadRepository(ReceiptRepository):
             )
         ]
 
+    def get_upload(self, session: Session, upload_pk: str) -> ReceiptUpload | None:
+        return session.get(ReceiptUpload, upload_pk)
+
     def sources(self, session: Session, receipt_pk: str) -> list[ReceiptSource]:
         return list(
             session.scalars(

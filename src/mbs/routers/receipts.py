@@ -49,6 +49,7 @@ from mbs.services.receipt_reads import (
     manual_receipt_stores,
     receipt_items_response,
     receipt_response,
+    receipt_upload_status_response,
 )
 from mbs.services.receipt_review import receipt_review_context
 from mbs.services.receipt_upload_commands import (
@@ -544,3 +545,15 @@ def resolve_near_match(
         "status": result.status.value,
         "idempotent": result.idempotent,
     }
+
+
+@router.get("/receipt-uploads/{upload_pk}/status")
+def get_receipt_upload_status(
+    upload_pk: str,
+    _current: tuple[User, AuthSession] = Depends(manager_session),  # noqa: B008
+    session: Session = Depends(get_session),  # noqa: B008
+) -> dict[str, object]:
+    try:
+        return receipt_upload_status_response(session, upload_pk)
+    except NotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error

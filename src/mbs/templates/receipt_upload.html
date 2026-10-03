@@ -53,9 +53,110 @@
           .find((part) => part.startsWith("mbs_csrf="))?.slice("mbs_csrf=".length) ?? "";
       }
 
+      const terminalStatuses = new Set(["SUCCEEDED", "REVIEW", "DUPLICATE", "FAILED"]);
+
       function setMessage(value, error = false) {
         message.textContent = value;
         message.dataset.error = String(error);
+      }
+
+      async function pollUploadStatus(uploadPk, status, orderList, idempotent) {
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const response = await fetch(
+            `/api/v1/receipt-uploads/${encodeURIComponent(uploadPk)}/status`,
+            { credentials: "same-origin" },
+          );
+          if (!response.ok) throw new Error("Upload status is unavailable");
+          const result = await response.json();
+          status.dataset.state = result.status;
+          status.textContent = idempotent ? `${result.status} · Already received` : result.status;
+          orderList.replaceChildren();
+          for (const order of result.orders ?? []) {
+            const orderRow = document.createElement("li");
+            orderRow.textContent = `Order ${order.order_index}: ${order.status}`;
+            if (order.issue_codes?.length) {
+              orderRow.textContent += ` (${order.issue_codes.join(", ")})`;
+            }
+            orderList.append(orderRow);
+          }
+          if (terminalStatuses.has(result.status)) return;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        status.textContent = "Still processing";
+      }
+
+      async function renderFileResult(file) {
+        const row = document.createElement("li");
+        const details = document.createElement("div");
+        const name = document.createElement("span");
+        const orderList = document.createElement("ul");
+        const actions = document.createElement("div");
+        const status = document.createElement("strong");
+        name.textContent = file.filename;
+        orderList.className = "result-list";
+        actions.append(status);
+        status.className = "status";
+        status.dataset.state = file.status;
+        status.textContent = file.idempotent ? `${file.status} · Already received` : file.status;
+        details.append(name, orderList);
+        row.append(details, actions);
+        resultList.append(row);
+
+        if (file.status === "POSSIBLE_DUPLICATE" && file.upload_pk) {
+          for (const [processAsNew, label] of [[true, "Process as new"], [false, "Already received"]]) {
+            const choice = document.createElement("button");
+            choice.type = "button";
+            choice.textContent = label;
+            choice.addEventListener("click", async () => {
+              choice.disabled = true;
+              try {
+                const response = await fetch(
+                  `/api/v1/receipt-uploads/${encodeURIComponent(file.upload_pk)}/resolve-near-match`,
+                  {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-CSRF-Token": csrfToken(),
+                    },
+                    body: JSON.stringify({ process_as_new: processAsNew }),
+                  },
+                );
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail ?? "Resolution failed");
+                status.dataset.state = result.status;
+                status.textContent = result.status;
+                actions.querySelectorAll("button").forEach((button) => button.remove());
+                if (result.status === "QUEUED") {
+                  await pollUploadStatus(file.upload_pk, status, orderList, false);
+                }
+              } catch (error) {
+                choice.disabled = false;
+                setMessage(error.message, true);
+              }
+            });
+            actions.append(choice);
+          }
+        } else if (file.upload_pk && ["QUEUED", "EXACT_DUPLICATE"].includes(file.status)) {
+          try {
+            await pollUploadStatus(file.upload_pk, status, orderList, file.idempotent);
+          } catch (error) {
+            status.textContent = "Status unavailable";
+            setMessage(error.message, true);
+          }
+        }
+      }
+
+      async function renderFileResults(files) {
+        let nextIndex = 0;
+        const workerCount = Math.min(files.length, 5);
+        await Promise.all(Array.from({ length: workerCount }, async () => {
+          while (nextIndex < files.length) {
+            const file = files[nextIndex];
+            nextIndex += 1;
+            await renderFileResult(file);
+          }
+        }));
       }
 
       input.addEventListener("change", () => {
@@ -91,17 +192,7 @@
           const result = await response.json();
           if (!response.ok) throw new Error(result.detail ?? "Batch upload failed");
           resultList.replaceChildren();
-          for (const file of result.files) {
-            const row = document.createElement("li");
-            const name = document.createElement("span");
-            const status = document.createElement("strong");
-            name.textContent = file.filename;
-            status.className = "status";
-            status.dataset.state = file.status;
-            status.textContent = file.idempotent ? `${file.status} · Already received` : file.status;
-            row.append(name, status);
-            resultList.append(row);
-          }
+          await renderFileResults(result.files);
           setMessage(`${result.file_count} file results received`);
         } catch (error) {
           setMessage(error.message, true);
